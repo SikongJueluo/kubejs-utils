@@ -1,0 +1,26 @@
+{
+  "$schema": "https://www.schemastore.org/jsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES5", "ES2015"],
+    "target": "ES2015",
+    "strict": true,
+    "checkJs": true,
+    "skipLibCheck": true,
+    "noImplicitAny": true,
+    "esModuleInterop": true,
+    "moduleResolution": "bundler",
+    "forceConsistentCasingInFileNames": true,
+    "rootDirs": [
+      "src/server_scripts",
+      "src/startup_scripts",
+      "src/client_scripts",
+      "src/lib"
+    ],
+    "typeRoots": [
+      "./types/probe/user",
+      "./types/probe/generated",
+      "./types/probe/generated/internals"
+    ]
+  },
+  "include": ["./src/**/*.js", "./types/**/*.d.ts"]
+}

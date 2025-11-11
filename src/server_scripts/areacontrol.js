@@ -6,11 +6,14 @@
 /**
  * @typedef {object} AreaControlConfig
  * @property {boolean} enabled
+ * @property {boolean} isIncludingOPs
+ * @property {boolean} enableCooldown
  * @property {{x: number, y: number, z: number}} center
  * @property {number} radius
- * @property {string[]} whitelist
+ * @property {string[]} whitelist - Players protected from gamemode changes
  * @property {"adventure" | "spectator"} mode
  * @property {number} cooldownSecs
+ * @property {number} checkFrequency
  */
 
 /**
@@ -29,7 +32,11 @@
 
 const SECOND_TICKS = 20;
 const CONFIG_FILE = "areacontrol_config.json";
-const CHECK_FREQUENCY = 20; // ticks (1 second)
+
+/**
+ * @type {EventBus | undefined}
+ */
+const EventBus = /** @type {any} */ (global["eventBus"]);
 
 // ==================== STATE MANAGEMENT ====================
 
@@ -39,11 +46,14 @@ const CHECK_FREQUENCY = 20; // ticks (1 second)
  */
 let config = {
     enabled: true,
+    isIncludingOPs: false,
+    enableCooldown: true,
     center: { x: 0, y: 0, z: 0 },
     radius: 5,
     whitelist: [],
     mode: "adventure",
     cooldownSecs: 10 * SECOND_TICKS, // 60 seconds
+    checkFrequency: 3 * SECOND_TICKS,
 };
 
 /**
@@ -61,15 +71,24 @@ const bounds = {
  * Player state cache - prevents unnecessary operations
  * @type {{[key: string]: boolean | undefined}}
  */
-const playerStates = {};
+let playerStates = {};
 
 /**
  * Item cooldown tracking
  * @type {{[key: string]: number | undefined}}
  */
-const playerCooldowns = {};
+let playerCooldowns = {};
 
 // ==================== UTILITY FUNCTIONS ====================
+
+/**
+ * Check if EventBus is available
+ * @param {any} obj
+ * @returns {obj is EventBus}
+ */
+function isEventBus(obj) {
+    return EventBus !== undefined && EventBus !== null;
+}
 
 /**
  * Update area bounds based on center and radius
@@ -85,7 +104,7 @@ function updateBounds(center, radius) {
     bounds.maxZ = center.z + radius;
 
     console.log(
-        `[AreaControl] Updated bounds: X(${String(bounds.minX)} to ${String(bounds.maxX)}), Z(${String(bounds.minZ)} to ${String(bounds.maxZ)})`,
+        `[AreaControl] Updated bounds: X(${bounds.minX} to ${bounds.maxX}), Z(${bounds.minZ} to ${bounds.maxZ})`,
     );
 }
 
@@ -106,12 +125,21 @@ function isPositionInArea(x, z) {
 }
 
 /**
- * Check if player is whitelisted for area control
- * @param {string} playerName
+ * Check if player is protected from area control gamemode changes
+ * @param {Internal.Player} player
  * @returns {boolean}
  */
-function isPlayerWhitelisted(playerName) {
-    return config.whitelist.indexOf(playerName) !== -1;
+function isPlayerWhitelisted(player) {
+    if (config.isIncludingOPs) {
+        return config.whitelist.indexOf(player.username) !== -1;
+    } else {
+        return (
+            config.whitelist.indexOf(player.username) !== -1 ||
+            player.hasPermissions(2) ||
+            player.hasPermissions(3) ||
+            player.hasPermissions(4)
+        );
+    }
 }
 
 /**
@@ -121,19 +149,19 @@ function isPlayerWhitelisted(playerName) {
  */
 function handlePlayerEnterArea(player) {
     // Apply configured game mode
+    const server = Utils.server;
     if (config.mode === "adventure") {
-        Utils.getServer().getPlayer(player.stringUuid).setGameMode("adventure");
+        server.getPlayer(player.stringUuid).setGameMode("adventure");
     } else {
-        Utils.getServer().getPlayer(player.stringUuid).setGameMode("spectator");
+        server.getPlayer(player.stringUuid).setGameMode("spectator");
     }
 
     // Send notification
-    player.tell(
-        /** @type {any} */ (
-            Component.string(
-                "§6[AreaControl] §eEntered protected area. Game mode changed.",
-            )
-        ),
+    server.runCommandSilent(
+        `/title ${player.username} title {"text":"进入活动场地","color":"gold"}`,
+    );
+    server.runCommandSilent(
+        `/title ${player.username} subtitle {"text":"切换为冒险模式","color":"yellow"}`,
     );
 }
 
@@ -144,15 +172,15 @@ function handlePlayerEnterArea(player) {
  */
 function handlePlayerLeaveArea(player) {
     // Restore survival mode
-    Utils.getServer().getPlayer(player.stringUuid).setGameMode("survival");
+    const server = Utils.server;
+    server.getPlayer(player.stringUuid).setGameMode("survival");
 
     // Send notification
-    player.tell(
-        /** @type {any} */ (
-            Component.string(
-                "§6[AreaControl] §eLeft protected area. Game mode restored.",
-            )
-        ),
+    server.runCommandSilent(
+        `/title ${player.username} title {"text":"离开活动场地","color":"gold"}`,
+    );
+    server.runCommandSilent(
+        `/title ${player.username} subtitle {"text":"切换为生存模式","color":"yellow"}`,
     );
 }
 
@@ -163,7 +191,7 @@ function handlePlayerLeaveArea(player) {
  * @returns {void}
  */
 function checkPlayerAreaStatus(player) {
-    if (!config.enabled || !isPlayerWhitelisted(player.username)) {
+    if (!config.enabled || isPlayerWhitelisted(player)) {
         return;
     }
 
@@ -192,7 +220,7 @@ function checkPlayerAreaStatus(player) {
  * @returns {boolean}
  */
 function shouldApplyItemCooldown(player) {
-    if (!config.enabled || !isPlayerWhitelisted(player.username)) {
+    if (!config.enabled || isPlayerWhitelisted(player)) {
         return false;
     }
 
@@ -206,15 +234,9 @@ function shouldApplyItemCooldown(player) {
  */
 function saveConfiguration() {
     const server = Utils.server;
-    try {
-        // Use KubeJS persistent data instead of JsonIO
-        if (server.persistentData.contains(CONFIG_FILE)) {
-            server.persistentData.put(CONFIG_FILE, NBT.toTag(config));
-            console.log("[AreaControl] Configuration saved successfully");
-        }
-    } catch (error) {
-        console.warn(`[AreaControl] Failed to save configuration:${error}`);
-    }
+    // Use KubeJS persistent data instead of JsonIO
+    server.persistentData.put(CONFIG_FILE, NBT.toTag(config));
+    console.log("[AreaControl] Configuration saved successfully");
 }
 
 /**
@@ -223,23 +245,15 @@ function saveConfiguration() {
  */
 function loadConfiguration() {
     const server = Utils.server;
-    try {
-        if (server.persistentData.contains(CONFIG_FILE)) {
-            const savedData = server.persistentData.get(CONFIG_FILE);
-            if (typeof savedData === "string") {
-                const loadedConfig = JSON.parse(savedData);
-                config = Object.assign(config, loadedConfig);
-                updateBounds(config.center, config.radius);
-                console.log("[AreaControl] Configuration loaded from file");
-            } else {
-                updateBounds(config.center, config.radius);
-                saveConfiguration(); // Create initial config
-                console.log("[AreaControl] Created default configuration");
-            }
-        }
-    } catch (error) {
+    if (server.persistentData.contains(CONFIG_FILE)) {
+        const savedData = server.persistentData.get(CONFIG_FILE);
+        const loadedConfig = NBT.fromTag(savedData);
+        config = Object.assign(config, loadedConfig);
+        updateBounds(config.center, config.radius);
+        console.log("[AreaControl] Configuration loaded from file");
+    } else {
         console.warn(
-            `[AreaControl] Failed to load configuration, using defaults: ${error}`,
+            "[AreaControl] Failed to load configuration, using defaults",
         );
         updateBounds(config.center, config.radius);
     }
@@ -267,7 +281,7 @@ function registerEventHandlers() {
         }
 
         console.log(
-            `[AreaControl] Player ${player.username} logged in, in area: ${String(isInArea)}`,
+            `[AreaControl] Player ${player.username} logged in, in area: ${isInArea}`,
         );
     });
 
@@ -293,33 +307,48 @@ function registerEventHandlers() {
         const { player } = event;
 
         // Check every CHECK_FREQUENCY ticks for performance
-        if (player.age % CHECK_FREQUENCY === 0) {
+        if (player.age % config.checkFrequency === 0) {
             checkPlayerAreaStatus(player);
         }
     });
 
+    if (!isEventBus(EventBus)) {
+        config.enableCooldown = false;
+        console.warn("[AreaControl] EventBus is not defined");
+        return;
+    }
     /**
      * @param {Internal.LivingEntityUseItemEvent$Finish} event
      */
-    // ForgeEvents.onEvent(
-    //     "net.minecraftforge.event.entity.living.LivingEntityUseItemEvent$Finish",
-    //     (event) => {
-    //         const { item: itemStack, entity } = event;
-    //         if (!entity.isPlayer()) return;
-    //         const player = Utils.server.getPlayer(entity.stringUuid);
-    //         if (player === undefined || player === null) return;
+    EventBus.register(
+        "LivingEntityUseItemEvent$Finish",
+        /**
+         * @param {Internal.LivingEntityUseItemEvent$Finish} event
+         */
+        (event) => {
+            if (!config.enableCooldown) return;
 
-    //         const item = itemStack.getItem();
-    //         const itemsCooldowns = player.getCooldowns();
+            const { item: itemStack, entity } = event;
+            if (!entity.isPlayer()) return;
+            const player = Utils.server.getPlayer(entity.stringUuid);
+            if (
+                player === undefined ||
+                player === null ||
+                !playerStates[player.stringUuid]
+            )
+                return;
 
-    //         if (
-    //             shouldApplyItemCooldown(player) &&
-    //             !itemsCooldowns.isOnCooldown(item)
-    //         ) {
-    //             itemsCooldowns.addCooldown(item, config.cooldownSecs);
-    //         }
-    //     },
-    // );
+            const item = itemStack.getItem();
+            const itemsCooldowns = player.getCooldowns();
+
+            if (
+                shouldApplyItemCooldown(player) &&
+                !itemsCooldowns.isOnCooldown(item)
+            ) {
+                itemsCooldowns.addCooldown(item, config.cooldownSecs);
+            }
+        },
+    );
 }
 
 /**
@@ -339,24 +368,39 @@ function registerCommands() {
          */
         const statusCommand = (ctx) => {
             const source = ctx.source;
-            source.sendSuccess("§6[AreaControl] Current Status:", false);
-            source.sendSuccess(`§e- Enabled: ${String(config.enabled)}`, false);
+            source.sendSuccess("§6[区域控制] 当前状态:", false);
             source.sendSuccess(
-                `§e- Center: (${String(config.center.x)}, ${String(config.center.y)}, ${String(config.center.z)})`,
-                false,
-            );
-            source.sendSuccess(`§e- Radius: ${String(config.radius)}`, false);
-            source.sendSuccess(`§e- Mode: ${config.mode}`, false);
-            source.sendSuccess(
-                `§e- Whitelist: ${String(config.whitelist.length)} players`,
+                `§e- 开启状态: ${config.enabled ? "已开启" : "已关闭"}`,
                 false,
             );
             source.sendSuccess(
-                `§e- Cooldown: ${String(config.cooldownSecs)} Ticks (${String(config.cooldownSecs / SECOND_TICKS)}s)`,
+                `§e- 是否包含管理员: ${config.isIncludingOPs ? "已包含" : "未包含"}`,
                 false,
             );
             source.sendSuccess(
-                `§e- Active players: ${String(Object.keys(playerStates).length)}`,
+                `§e- 中心点: (${config.center.x}, ${config.center.y}, ${config.center.z})`,
+                false,
+            );
+            source.sendSuccess(`§e- 半径: ${config.radius}`, false);
+            source.sendSuccess(`§e- 模式: ${config.mode}`, false);
+            source.sendSuccess(
+                `§e- 白名单: ${config.whitelist.length} 名玩家`,
+                false,
+            );
+            source.sendSuccess(
+                `§e- 是否启用物品冷却: ${config.enableCooldown ? "已启用" : "未启用"}`,
+                false,
+            );
+            source.sendSuccess(
+                `§e- 物品冷却时间: ${config.cooldownSecs} 刻 (${config.cooldownSecs / SECOND_TICKS}秒)`,
+                false,
+            );
+            source.sendSuccess(
+                `§e- 检查频率: ${config.checkFrequency} 刻 (${config.checkFrequency / SECOND_TICKS}秒)`,
+                false,
+            );
+            source.sendSuccess(
+                `§e- 活跃玩家: ${Object.keys(playerStates).length}`,
                 false,
             );
             return 1;
@@ -368,11 +412,19 @@ function registerCommands() {
          */
         const toggleCommand = (ctx) => {
             config.enabled = !config.enabled;
+            if (!config.enabled) {
+                for (const playerUuid of Object.keys(playerStates)) {
+                    const player = Utils.server.getPlayer(playerUuid);
+                    handlePlayerLeaveArea(player);
+                }
+                playerStates = {};
+                playerCooldowns = {};
+            }
             saveConfiguration();
             ctx.source.sendSuccess(
                 config.enabled
-                    ? "§6[AreaControl] §aEnabled"
-                    : "§6[AreaControl] §cDisabled",
+                    ? "§6[区域控制] §a已启用"
+                    : "§6[区域控制] §c已禁用",
                 true,
             );
             return 1;
@@ -385,7 +437,7 @@ function registerCommands() {
         const setCenterCommand = (ctx) => {
             const source = ctx.source;
             if (!source.player) {
-                source.sendFailure("§cThis command must be run by a player");
+                source.sendFailure("§c此命令必须由玩家执行");
                 return 0;
             }
             const pos = source.player.blockPosition();
@@ -393,7 +445,7 @@ function registerCommands() {
             updateBounds(config.center, config.radius);
             saveConfiguration();
             source.sendSuccess(
-                `§6[AreaControl] §eCenter set to (${String(pos.x)}, ${String(pos.y)}, ${String(pos.z)})`,
+                `§6[区域控制] §e中心点设置为 (${pos.x}, ${pos.y}, ${pos.z})`,
                 true,
             );
             return 1;
@@ -405,17 +457,14 @@ function registerCommands() {
          */
         const setRadiusCommand = (ctx) => {
             const radius = Arguments.INTEGER.getResult(ctx, "radius");
-            if (radius < 1 || radius > 1000) {
-                ctx.source.sendFailure("§cRadius must be between 1 and 1000");
+            if (radius < 1 || radius > 8192) {
+                ctx.source.sendFailure("§c半径必须在 1 到 8192 之间");
                 return 0;
             }
             config.radius = radius;
             updateBounds(config.center, config.radius);
             saveConfiguration();
-            ctx.source.sendSuccess(
-                `§6[AreaControl] §eRadius set to ${String(radius)}`,
-                true,
-            );
+            ctx.source.sendSuccess(`§6[区域控制] §e半径设置为 ${radius}`, true);
             return 1;
         };
 
@@ -427,14 +476,14 @@ function registerCommands() {
             const mode = Arguments.STRING.getResult(ctx, "mode");
             if (mode !== "adventure" && mode !== "spectator") {
                 ctx.source.sendFailure(
-                    '§cMode must be either "adventure" or "spectator"',
+                    '§c模式必须是 "adventure" 或 "spectator"',
                 );
                 return 0;
             }
             config.mode = mode;
             saveConfiguration();
             ctx.source.sendSuccess(
-                `§6[AreaControl] §eArea mode set to ${mode}`,
+                `§6[区域控制] §e区域模式设置为 ${mode}`,
                 true,
             );
             return 1;
@@ -447,15 +496,71 @@ function registerCommands() {
         const setCooldownCommand = (ctx) => {
             const cooldown = Arguments.INTEGER.getResult(ctx, "cooldown");
             if (cooldown < 0) {
-                ctx.source.sendFailure(
-                    "§cCooldown must be a non-negative number",
-                );
+                ctx.source.sendFailure("§c冷却时间必须是非负数");
                 return 0;
             }
             config.cooldownSecs = cooldown;
             saveConfiguration();
             ctx.source.sendSuccess(
-                `§6[AreaControl] §eItem cooldown set to ${String(cooldown)} ticks (${String(cooldown / 20)}s)`,
+                `§6[区域控制] §e物品冷却时间设置为 ${cooldown} 刻 (${cooldown / SECOND_TICKS}秒)`,
+                true,
+            );
+            return 1;
+        };
+
+        /**
+         * @param {any} ctx
+         * @returns {number}
+         */
+        const setCheckFrequencyCommand = (ctx) => {
+            const frequency = Arguments.INTEGER.getResult(
+                ctx,
+                "checkFrequency",
+            );
+            if (frequency < 0) {
+                ctx.source.sendFailure("§c检查频率必须是非负数");
+                return 0;
+            }
+            config.checkFrequency = frequency;
+            saveConfiguration();
+            ctx.source.sendSuccess(
+                `§6[区域控制] §e检查频率设置为 ${frequency} 刻 (${frequency / SECOND_TICKS}秒)`,
+                true,
+            );
+            return 1;
+        };
+
+        /**
+         * @param {any} ctx
+         * @returns {number}
+         */
+        const toggleIncludingOPsCommand = (ctx) => {
+            config.isIncludingOPs = !config.isIncludingOPs;
+            saveConfiguration();
+            ctx.source.sendSuccess(
+                config.isIncludingOPs
+                    ? "§6[区域控制] §a包含管理员"
+                    : "§6[区域控制] §c不包含管理员",
+                true,
+            );
+            return 1;
+        };
+
+        /**
+         * @param {any} ctx
+         * @returns {number}
+         */
+        const toggleCooldownCommand = (ctx) => {
+            if (!isEventBus(EventBus)) {
+                ctx.source.sendFailure("§c事件总线未注入，无法切换");
+                return 0;
+            }
+            config.enableCooldown = !config.enableCooldown;
+            saveConfiguration();
+            ctx.source.sendSuccess(
+                config.enableCooldown
+                    ? "§6[区域控制] §a启用冷却"
+                    : "§6[区域控制] §c禁用冷却",
                 true,
             );
             return 1;
@@ -471,13 +576,11 @@ function registerCommands() {
                 config.whitelist.push(playerName);
                 saveConfiguration();
                 ctx.source.sendSuccess(
-                    `§6[AreaControl] §eAdded ${playerName} to whitelist`,
+                    `§6[区域控制] §e已将 ${playerName} 添加到白名单 (受游戏模式更改保护)`,
                     true,
                 );
             } else {
-                ctx.source.sendFailure(
-                    `§c${playerName} is already whitelisted`,
-                );
+                ctx.source.sendFailure(`§c${playerName} 已受游戏模式更改保护`);
             }
             return 1;
         };
@@ -506,11 +609,11 @@ function registerCommands() {
                 }
                 saveConfiguration();
                 ctx.source.sendSuccess(
-                    `§6[AreaControl] §eRemoved ${playerName} from whitelist`,
+                    `§6[区域控制] §e已将 ${playerName} 从白名单中移除 (不再受保护)`,
                     true,
                 );
             } else {
-                ctx.source.sendFailure(`§c${playerName} is not whitelisted`);
+                ctx.source.sendFailure(`§c${playerName} 不受游戏模式更改保护`);
             }
             return 1;
         };
@@ -523,12 +626,12 @@ function registerCommands() {
             const source = ctx.source;
             if (config.whitelist.length === 0) {
                 source.sendSuccess(
-                    "§6[AreaControl] §eWhitelist is empty",
+                    "§6[区域控制] §e没有玩家受游戏模式更改保护",
                     false,
                 );
             } else {
                 source.sendSuccess(
-                    "§6[AreaControl] §eWhitelisted players:",
+                    "§6[区域控制] §e受游戏模式更改保护的玩家:",
                     false,
                 );
                 config.whitelist.forEach((playerName) => {
@@ -544,10 +647,9 @@ function registerCommands() {
          */
         const reloadCommand = (ctx) => {
             loadConfiguration();
-            ctx.source.sendSuccess(
-                "§6[AreaControl] §aConfiguration reloaded",
-                true,
-            );
+            playerStates = {};
+            playerCooldowns = {};
+            ctx.source.sendSuccess("§6[区域控制] §a配置已重新加载", true);
             return 1;
         };
 
@@ -557,31 +659,34 @@ function registerCommands() {
          */
         const helpCommand = (ctx) => {
             const source = ctx.source;
-            source.sendFailure("§cAvailable commands:");
+            source.sendFailure("§c可用命令:");
+            source.sendFailure("§e- /areacontrol status - 显示当前配置");
+            source.sendFailure("§e- /areacontrol toggle - 启用/禁用系统");
             source.sendFailure(
-                "§e- /areacontrol status - Show current configuration",
+                "§e- /areacontrol toggleIncludingOPs - 是/否包括管理员",
             );
             source.sendFailure(
-                "§e- /areacontrol toggle - Enable/disable the system",
+                "§e- /areacontrol toggleCooldown - 启用/禁用物品冷却",
             );
             source.sendFailure(
-                "§e- /areacontrol setcenter - Set area center to current position",
+                "§e- /areacontrol setcenter - 将区域中心设置为当前位置",
             );
             source.sendFailure(
-                "§e- /areacontrol setradius <radius> - Set area radius",
+                "§e- /areacontrol setradius <radius> - 设置区域半径",
             );
             source.sendFailure(
-                "§e- /areacontrol setmode <adventure|spectator> - Set area game mode",
+                "§e- /areacontrol setmode <adventure|spectator> - 设置区域游戏模式",
             );
             source.sendFailure(
-                "§e- /areacontrol setcooldown <ticks> - Set item cooldown",
+                "§e- /areacontrol setcooldown <ticks> - 设置物品冷却时间",
             );
             source.sendFailure(
-                "§e- /areacontrol whitelist <add|remove|list> [player] - Manage whitelist",
+                "§e- /areacontrol setcheckfrequency <ticks> - 设置检查频率",
             );
             source.sendFailure(
-                "§e- /areacontrol reload - Reload configuration",
+                "§e- /areacontrol whitelist <add|remove|list> [player] - 管理游戏模式更改白名单",
             );
+            source.sendFailure("§e- /areacontrol reload - 重新加载配置");
             return 1;
         };
 
@@ -593,6 +698,16 @@ function registerCommands() {
                 .executes(statusCommand) // Default to status when no args
                 .then(commands.literal("status").executes(statusCommand))
                 .then(commands.literal("toggle").executes(toggleCommand))
+                .then(
+                    commands
+                        .literal("toggleCooldown")
+                        .executes(toggleCooldownCommand),
+                )
+                .then(
+                    commands
+                        .literal("toggleIncludingOPs")
+                        .executes(toggleIncludingOPsCommand),
+                )
                 .then(commands.literal("setcenter").executes(setCenterCommand))
                 .then(
                     commands
@@ -632,6 +747,19 @@ function registerCommands() {
                 )
                 .then(
                     commands
+                        .literal("setcheckFrequency")
+                        .then(
+                            commands
+                                .argument(
+                                    "checkFrequency",
+                                    Arguments.INTEGER.create(event),
+                                )
+                                .executes(setCheckFrequencyCommand),
+                        ),
+                )
+
+                .then(
+                    commands
                         .literal("whitelist")
                         .then(
                             commands
@@ -640,7 +768,7 @@ function registerCommands() {
                                     commands
                                         .argument(
                                             "player",
-                                            Arguments.STRING.create(event),
+                                            Arguments.PLAYER.create(event),
                                         )
                                         .executes(whitelistAddCommand),
                                 ),
@@ -652,7 +780,7 @@ function registerCommands() {
                                     commands
                                         .argument(
                                             "player",
-                                            Arguments.STRING.create(event),
+                                            Arguments.PLAYER.create(event),
                                         )
                                         .executes(whitelistRemoveCommand),
                                 ),
@@ -678,8 +806,10 @@ function registerCommands() {
 function initializeAreaControl() {
     console.log("[AreaControl] Initializing area control system...");
 
-    // Load configuration
-    loadConfiguration();
+    // Load configuration after server loaded
+    ServerEvents.loaded((_) => {
+        loadConfiguration();
+    });
 
     // Register event handlers
     registerEventHandlers();
@@ -689,14 +819,12 @@ function initializeAreaControl() {
 
     console.log("[AreaControl] System initialized successfully");
     console.log(
-        `[AreaControl] Area: center(${String(config.center.x)}, ${String(config.center.z)}), radius: ${String(config.radius)}`,
+        `[AreaControl] Area: center(${config.center.x}, ${config.center.z}), radius: ${config.radius}`,
     );
     console.log(
-        `[AreaControl] Mode: ${config.mode}, Enabled: ${String(config.enabled)}`,
+        `[AreaControl] Mode: ${config.mode}, Enabled: ${config.enabled}`,
     );
-    console.log(
-        `[AreaControl] Whitelisted players: ${String(config.whitelist.length)}`,
-    );
+    console.log(`[AreaControl] Protected players: ${config.whitelist.length}`);
 }
 
 // ==================== STARTUP EXECUTION ====================

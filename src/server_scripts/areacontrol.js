@@ -4,19 +4,6 @@
 // ==================== TYPE DEFINITIONS ====================
 
 /**
- * @typedef {object} AreaControlConfig
- * @property {boolean} enabled
- * @property {boolean} isIncludingOPs
- * @property {boolean} enableCooldown
- * @property {{x: number, y: number, z: number}} center
- * @property {number} radius
- * @property {string[]} whitelist - Players protected from gamemode changes
- * @property {"adventure" | "spectator"} mode
- * @property {number} cooldownSecs
- * @property {number} checkFrequency
- */
-
-/**
  * @typedef {object} AreaBounds
  * @property {number} minX
  * @property {number} maxX
@@ -25,7 +12,15 @@
  */
 
 /**
- * @typedef {typeof Internal.HashMap} HashMap
+ * @typedef {object} AreaControlConfig
+ * @property {boolean} enabled
+ * @property {boolean} isIncludingOPs
+ * @property {boolean} enableCooldown
+ * @property {AreaBounds} areaBounds
+ * @property {string[]} whitelist - Players protected from gamemode changes
+ * @property {"adventure" | "spectator"} mode
+ * @property {number} cooldownSecs
+ * @property {number} checkFrequency
  */
 
 // ==================== GLOBAL CONSTANTS ====================
@@ -48,23 +43,32 @@ let config = {
     enabled: true,
     isIncludingOPs: false,
     enableCooldown: true,
-    center: { x: 0, y: 0, z: 0 },
-    radius: 5,
+    areaBounds: {
+        minX: -50,
+        maxX: 50,
+        minZ: -50,
+        maxZ: 50,
+    },
     whitelist: [],
     mode: "adventure",
     cooldownSecs: 10 * SECOND_TICKS, // 60 seconds
     checkFrequency: 3 * SECOND_TICKS,
 };
 
-/**
- * Pre-calculated bounds for O(1) area checking
- * @type {AreaBounds}
+/** Whether the player is changing position
+ * @type {boolean}
  */
-const bounds = {
-    minX: -50,
-    maxX: 50,
-    minZ: -50,
-    maxZ: 50,
+let isChangingPos = false;
+
+/**
+ * Temporary position storage
+ * @type {{x1: number, x2: number, z1: number, z2: number}}
+ */
+const tempPos = {
+    x1: 0,
+    x2: 0,
+    z1: 0,
+    z2: 0,
 };
 
 /**
@@ -97,14 +101,29 @@ function isEventBus(obj) {
  * @param {number} radius
  * @returns {void}
  */
-function updateBounds(center, radius) {
-    bounds.minX = center.x - radius;
-    bounds.maxX = center.x + radius;
-    bounds.minZ = center.z - radius;
-    bounds.maxZ = center.z + radius;
+function updateBoundsFromCircular(center, radius) {
+    config.areaBounds.minX = center.x - radius;
+    config.areaBounds.maxX = center.x + radius;
+    config.areaBounds.minZ = center.z - radius;
+    config.areaBounds.maxZ = center.z + radius;
 
     console.log(
-        `[AreaControl] Updated bounds: X(${bounds.minX} to ${bounds.maxX}), Z(${bounds.minZ} to ${bounds.maxZ})`,
+        `[AreaControl] Updated bounds: X(${config.areaBounds.minX} to ${config.areaBounds.maxX}), Z(${config.areaBounds.minZ} to ${config.areaBounds.maxZ})`,
+    );
+}
+
+/**
+ * Updates area bounds based on temporary position
+ * @param {{x1: number, x2: number, z1: number, z2: number}} pos
+ */
+function updateBoundsFromPos(pos) {
+    config.areaBounds.minX = JavaMath.min(pos.x1, pos.x2);
+    config.areaBounds.maxX = JavaMath.max(pos.x1, pos.x2);
+    config.areaBounds.minZ = JavaMath.min(pos.z1, pos.z2);
+    config.areaBounds.maxZ = JavaMath.max(pos.z1, pos.z2);
+
+    console.log(
+        `[AreaControl] Updated bounds: X(${config.areaBounds.minX} to ${config.areaBounds.maxX}), Z(${config.areaBounds.minZ} to ${config.areaBounds.maxZ})`,
     );
 }
 
@@ -117,10 +136,10 @@ function updateBounds(center, radius) {
  */
 function isPositionInArea(x, z) {
     return (
-        x >= bounds.minX &&
-        x <= bounds.maxX &&
-        z >= bounds.minZ &&
-        z <= bounds.maxZ
+        x >= config.areaBounds.minX &&
+        x <= config.areaBounds.maxX &&
+        z >= config.areaBounds.minZ &&
+        z <= config.areaBounds.maxZ
     );
 }
 
@@ -249,13 +268,11 @@ function loadConfiguration() {
         const savedData = server.persistentData.get(CONFIG_FILE);
         const loadedConfig = NBT.fromTag(savedData);
         config = Object.assign(config, loadedConfig);
-        updateBounds(config.center, config.radius);
         console.log("[AreaControl] Configuration loaded from file");
     } else {
         console.warn(
             "[AreaControl] Failed to load configuration, using defaults",
         );
-        updateBounds(config.center, config.radius);
     }
 }
 
@@ -290,8 +307,9 @@ function registerEventHandlers() {
      */
     PlayerEvents.loggedOut((event) => {
         const { player } = event;
-        const playerId = player.stringUuid;
 
+        const playerId = player.stringUuid;
+        Utils.server.getPlayer(playerId).setGameMode("survival");
         delete playerStates[playerId];
         delete playerCooldowns[playerId];
 
@@ -317,9 +335,7 @@ function registerEventHandlers() {
         console.warn("[AreaControl] EventBus is not defined");
         return;
     }
-    /**
-     * @param {Internal.LivingEntityUseItemEvent$Finish} event
-     */
+
     EventBus.register(
         "LivingEntityUseItemEvent$Finish",
         /**
@@ -378,10 +394,9 @@ function registerCommands() {
                 false,
             );
             source.sendSuccess(
-                `§e- 中心点: (${config.center.x}, ${config.center.y}, ${config.center.z})`,
+                `§e- 区域: (${config.areaBounds.minX}, ${config.areaBounds.minZ}) (${config.areaBounds.maxX}, ${config.areaBounds.maxZ})`,
                 false,
             );
-            source.sendSuccess(`§e- 半径: ${config.radius}`, false);
             source.sendSuccess(`§e- 模式: ${config.mode}`, false);
             source.sendSuccess(
                 `§e- 白名单: ${config.whitelist.length} 名玩家`,
@@ -434,18 +449,13 @@ function registerCommands() {
          * @param {any} ctx
          * @returns {number}
          */
-        const setCenterCommand = (ctx) => {
-            const source = ctx.source;
-            if (!source.player) {
-                source.sendFailure("§c此命令必须由玩家执行");
-                return 0;
-            }
-            const pos = source.player.blockPosition();
-            config.center = { x: pos.x, y: pos.y, z: pos.z };
-            updateBounds(config.center, config.radius);
+        const toggleIncludingOPsCommand = (ctx) => {
+            config.isIncludingOPs = !config.isIncludingOPs;
             saveConfiguration();
-            source.sendSuccess(
-                `§6[区域控制] §e中心点设置为 (${pos.x}, ${pos.y}, ${pos.z})`,
+            ctx.source.sendSuccess(
+                config.isIncludingOPs
+                    ? "§6[区域控制] §a包含管理员"
+                    : "§6[区域控制] §c不包含管理员",
                 true,
             );
             return 1;
@@ -455,16 +465,104 @@ function registerCommands() {
          * @param {any} ctx
          * @returns {number}
          */
-        const setRadiusCommand = (ctx) => {
-            const radius = Arguments.INTEGER.getResult(ctx, "radius");
-            if (radius < 1 || radius > 8192) {
-                ctx.source.sendFailure("§c半径必须在 1 到 8192 之间");
+        const toggleCooldownCommand = (ctx) => {
+            if (!isEventBus(EventBus)) {
+                ctx.source.sendFailure("§c事件总线未注入，无法切换");
                 return 0;
             }
-            config.radius = radius;
-            updateBounds(config.center, config.radius);
+            config.enableCooldown = !config.enableCooldown;
             saveConfiguration();
-            ctx.source.sendSuccess(`§6[区域控制] §e半径设置为 ${radius}`, true);
+            ctx.source.sendSuccess(
+                config.enableCooldown
+                    ? "§6[区域控制] §a启用冷却"
+                    : "§6[区域控制] §c禁用冷却",
+                true,
+            );
+            return 1;
+        };
+
+        /**
+         * @param {any} ctx
+         * @returns {number}
+         */
+        const setPos1Command = (ctx) => {
+            const source = ctx.source;
+            if (!source.player) {
+                source.sendFailure("§c此命令必须由玩家执行");
+                return 0;
+            }
+            const pos = source.player.blockPosition();
+
+            tempPos.x1 = pos.x;
+            tempPos.z1 = pos.z;
+            isChangingPos = true;
+            ctx.source.sendSuccess(
+                `§6[区域控制] §a已设置第一个位置: ${pos.x}, ${pos.z}`,
+                true,
+            );
+            return 1;
+        };
+
+        /**
+         * @param {any} ctx
+         * @returns {number}
+         */
+        const setPos2Command = (ctx) => {
+            const source = ctx.source;
+            if (!source.player) {
+                source.sendFailure("§c此命令必须由玩家执行");
+                return 0;
+            }
+            if (!isChangingPos) {
+                source.sendFailure("§c请先设置第一个位置");
+                return 0;
+            }
+
+            const pos = source.player.blockPosition();
+            tempPos.x2 = pos.x;
+            tempPos.z2 = pos.z;
+            isChangingPos = false;
+            ctx.source.sendSuccess(
+                `§6[区域控制] §a已设置第二个位置: ${pos.x}, ${pos.z}`,
+                true,
+            );
+
+            updateBoundsFromPos(tempPos);
+            saveConfiguration();
+            source.sendSuccess(
+                `§e- 区域: (${config.areaBounds.minX}, ${config.areaBounds.minZ}) (${config.areaBounds.maxX}, ${config.areaBounds.maxZ})`,
+                true,
+            );
+
+            return 1;
+        };
+
+        /**
+         * @param {any} ctx
+         * @returns {number}
+         */
+        const setCircularAreaCommand = (ctx) => {
+            const source = ctx.source;
+            if (!source.player) {
+                source.sendFailure("§c此命令必须由玩家执行");
+                return 0;
+            }
+            const radius = Arguments.INTEGER.getResult(ctx, "radius");
+            if (radius < 1 || radius > 8192) {
+                source.sendFailure("§c半径必须在 1 到 8192 之间");
+                return 0;
+            }
+            const pos = source.player.blockPosition();
+            updateBoundsFromCircular({ x: pos.x, y: pos.y, z: pos.z }, radius);
+            saveConfiguration();
+            source.sendSuccess(
+                `§6[区域控制] §e区域已设置：中心点 (${pos.x}, ${pos.y}, ${pos.z})，半径 ${radius}`,
+                true,
+            );
+            source.sendSuccess(
+                `§e- 区域: (${config.areaBounds.minX}, ${config.areaBounds.minZ}) (${config.areaBounds.maxX}, ${config.areaBounds.maxZ})`,
+                true,
+            );
             return 1;
         };
 
@@ -525,42 +623,6 @@ function registerCommands() {
             saveConfiguration();
             ctx.source.sendSuccess(
                 `§6[区域控制] §e检查频率设置为 ${frequency} 刻 (${frequency / SECOND_TICKS}秒)`,
-                true,
-            );
-            return 1;
-        };
-
-        /**
-         * @param {any} ctx
-         * @returns {number}
-         */
-        const toggleIncludingOPsCommand = (ctx) => {
-            config.isIncludingOPs = !config.isIncludingOPs;
-            saveConfiguration();
-            ctx.source.sendSuccess(
-                config.isIncludingOPs
-                    ? "§6[区域控制] §a包含管理员"
-                    : "§6[区域控制] §c不包含管理员",
-                true,
-            );
-            return 1;
-        };
-
-        /**
-         * @param {any} ctx
-         * @returns {number}
-         */
-        const toggleCooldownCommand = (ctx) => {
-            if (!isEventBus(EventBus)) {
-                ctx.source.sendFailure("§c事件总线未注入，无法切换");
-                return 0;
-            }
-            config.enableCooldown = !config.enableCooldown;
-            saveConfiguration();
-            ctx.source.sendSuccess(
-                config.enableCooldown
-                    ? "§6[区域控制] §a启用冷却"
-                    : "§6[区域控制] §c禁用冷却",
                 true,
             );
             return 1;
@@ -669,10 +731,13 @@ function registerCommands() {
                 "§e- /areacontrol toggleCooldown - 启用/禁用物品冷却",
             );
             source.sendFailure(
-                "§e- /areacontrol setcenter - 将区域中心设置为当前位置",
+                "§e- /areacontrol setCircularArea <radius> - 将区域中心设置为当前位置并设置半径",
             );
             source.sendFailure(
-                "§e- /areacontrol setradius <radius> - 设置区域半径",
+                "§e- /areacontrol setAreaPos1  - 将玩家位置设置为区域第一个位置",
+            );
+            source.sendFailure(
+                "§e- /areacontrol setAreaPos2  - 将玩家位置设置为区域第二个位置",
             );
             source.sendFailure(
                 "§e- /areacontrol setmode <adventure|spectator> - 设置区域游戏模式",
@@ -708,17 +773,18 @@ function registerCommands() {
                         .literal("toggleIncludingOPs")
                         .executes(toggleIncludingOPsCommand),
                 )
-                .then(commands.literal("setcenter").executes(setCenterCommand))
+                .then(commands.literal("setAreaPos1").executes(setPos1Command))
+                .then(commands.literal("setAreaPos2").executes(setPos2Command))
                 .then(
                     commands
-                        .literal("setradius")
+                        .literal("setCircularArea")
                         .then(
                             commands
                                 .argument(
                                     "radius",
                                     Arguments.INTEGER.create(event),
                                 )
-                                .executes(setRadiusCommand),
+                                .executes(setCircularAreaCommand),
                         ),
                 )
                 .then(
@@ -819,7 +885,7 @@ function initializeAreaControl() {
 
     console.log("[AreaControl] System initialized successfully");
     console.log(
-        `[AreaControl] Area: center(${config.center.x}, ${config.center.z}), radius: ${config.radius}`,
+        `[AreaControl] Area: (${config.areaBounds.minX}, ${config.areaBounds.minZ})  (${config.areaBounds.maxX}, ${config.areaBounds.maxZ})`,
     );
     console.log(
         `[AreaControl] Mode: ${config.mode}, Enabled: ${config.enabled}`,

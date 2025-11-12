@@ -48,12 +48,15 @@
 -   `/areacontrol toggleCooldown`
     -   **功能**：启用或禁用物品冷却功能。
 
--   `/areacontrol setcenter`
-    -   **功能**：将您当前的位置设置为区域的中心点。
+-   `/areacontrol setCircularArea <半径>`
+    -   **功能**：将您当前的位置设置为区域的中心点，并定义其半径。
+    -   **示例**：`/areacontrol setCircularArea 100`
 
--   `/areacontrol setradius <半径>`
-    -   **功能**：设置区域的半径。
-    -   **示例**：`/areacontrol setradius 100`
+-   `/areacontrol setAreaPos1`
+    -   **功能**：将您当前的位置设置为区域的第一个角点。
+
+-   `/areacontrol setAreaPos2`
+    -   **功能**：将您当前的位置设置为区域的第二个角点，从而定义一个矩形区域。
 
 -   `/areacontrol setmode <adventure|spectator>`
     -   **功能**：设置玩家进入区域后切换到的游戏模式。
@@ -112,7 +115,7 @@ PlayerEvents.tick((event) => {
 #### 状态缓存与边界检测
 为避免不必要的操作，脚本采用状态缓存和快速边界检测。
 
-1.  **边界预计算**：当 `center` 或 `radius` 改变时，脚本会预先计算出区域的 `minX`, `maxX`, `minZ`, `maxZ` 边界。
+1.  **边界预计算**：当区域被定义时（无论是通过 `setCircularArea` 定义的圆形区域，还是通过 `setAreaPos1`/`setAreaPos2` 定义的矩形区域），脚本会预先计算出区域的 `minX`, `maxX`, `minZ`, `maxZ` 边界。
 2.  **快速检测**：在检查玩家位置时，只需将玩家的 X 和 Z 坐标与预计算的边界进行比较，这是一个 O(1) 的高效操作。
 3.  **状态缓存**：一个名为 `playerStates` 的全局对象缓存着每个玩家是否在区域内的布尔值。只有当玩家的当前状态与缓存状态不一致时（即玩家穿越了区域边界），脚本才会执行游戏模式切换等核心逻辑，并更新缓存。
 

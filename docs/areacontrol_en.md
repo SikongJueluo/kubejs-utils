@@ -48,12 +48,15 @@ You can manage the script in-game using the `/areacontrol` command series. All c
 -   `/areacontrol toggleCooldown`
     -   **Function**: Enable or disable the item cooldown feature.
 
--   `/areacontrol setcenter`
-    -   **Function**: Set your current position as the center of the zone.
+-   `/areacontrol setCircularArea <radius>`
+    -   **Function**: Set your current position as the center of the zone and define its radius.
+    -   **Example**: `/areacontrol setCircularArea 100`
 
--   `/areacontrol setradius <radius>`
-    -   **Function**: Set the radius of the zone.
-    -   **Example**: `/areacontrol setradius 100`
+-   `/areacontrol setAreaPos1`
+    -   **Function**: Set the first corner of the area to your current position.
+
+-   `/areacontrol setAreaPos2`
+    -   **Function**: Set the second corner of the area to your current position, defining a rectangular zone.
 
 -   `/areacontrol setmode <adventure|spectator>`
     -   **Function**: Set the game mode players will be switched to upon entering the zone.
@@ -112,7 +115,7 @@ PlayerEvents.tick((event) => {
 #### State Caching and Boundary Detection
 To avoid unnecessary operations, the script uses state caching and fast boundary detection.
 
-1.  **Boundary Pre-calculation**: When `center` or `radius` changes, the script pre-calculates the area's `minX`, `maxX`, `minZ`, `maxZ` boundaries.
+1.  **Boundary Pre-calculation**: When the area is defined (either as a circular zone with `setCircularArea` or a rectangular zone with `setAreaPos1`/`setAreaPos2`), the script pre-calculates the area's `minX`, `maxX`, `minZ`, `maxZ` boundaries.
 2.  **Fast Detection**: When checking a player's position, it only needs to compare the player's X and Z coordinates with the pre-calculated boundaries, which is an efficient O(1) operation.
 3.  **State Caching**: A global object named `playerStates` caches whether each player is inside the area (as a boolean). The core logic, like switching game modes, is executed only when the player's current state differs from the cached state (i.e., the player has crossed the area boundary). The cache is then updated.
 

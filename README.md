@@ -14,7 +14,7 @@ A powerful area management script that allows administrators to define a special
     - Automatically switches the game mode (e.g., from Survival to Adventure/Spectator) when a player enters/leaves the defined area.
     - Configurable whitelist to exempt certain players (like OPs) from the rules.
     - Sets a uniform item usage cooldown for all players within the zone.
-    - Provides a rich set of in-game commands to configure the zone's center, radius, target game mode, and more in real-time.
+    - Provides a rich set of in-game commands to configure the zone's boundaries, target game mode, and more in real-time.
 - **Design Philosophy**:
     - **High Performance**: Built with an event-driven architecture and a throttled checking mechanism to minimize impact on server performance.
     - **Persistence**: All configurations are saved automatically and persist through server restarts.

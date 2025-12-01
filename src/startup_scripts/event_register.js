@@ -94,10 +94,3 @@ ForgeEvents.onEvent(
         eventBus.emit("PlayerItemFishedEvent", event);
     },
 );
-
-ForgeEvents.onEvent(
-    "net.minecraftforge.event.entity.player.ItemFishedEvent",
-    (event) => {
-        eventBus.emit("PlayerItemFishedEvent", event);
-    },
-);

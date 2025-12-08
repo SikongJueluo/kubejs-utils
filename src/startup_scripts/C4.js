@@ -1,13 +1,15 @@
+const KeyMapping = Java.loadClass("net.minecraft.client.KeyMapping");
+
 const C4_EXPLOSION_TIME = 3 * 20;
 const C4_EXPLOSION_RANGE = 256;
 
 /**
- * @type {Map<Internal.UUID, {
+ * @type {{ [key: string]:{
  *  angle: {x: number, y:number, z:number},
  *  pos: {x: number, y: number, z: number}
- * }>}
+ * } | undefined}}
  */
-const lastPlayerInfoMap = new Map();
+const lastPlayerInfoMap = {};
 
 /**
  * @param {Internal.ItemStack} itemstack
@@ -24,7 +26,7 @@ function shouldActivateC4(itemstack, level, player) {
     );
 
     const lookAngle = player.lookAngle;
-    const lastPlayerInfo = lastPlayerInfoMap.get(player.UUID);
+    const lastPlayerInfo = lastPlayerInfoMap[player.uuid.toString()];
     if (lastPlayerInfo === undefined) return false;
     const isPlayerInfoChanged =
         lookAngle.x() !== lastPlayerInfo.angle.x ||
@@ -36,7 +38,8 @@ function shouldActivateC4(itemstack, level, player) {
 
     return (
         /** @type {string} */ (block.id) === "kubejs:c4_target" &&
-        !isPlayerInfoChanged
+        !isPlayerInfoChanged &&
+        /** @type {string} */ (itemstack.id) === "kubejs:c4_item"
     );
 }
 
@@ -68,8 +71,8 @@ StartupEvents.registry("item", (event) => {
         .create("c4_item")
         .unstackable()
         .useAnimation("eat")
-        .useDuration((itemStack) => 100) // 5 Seconds
-        .use((level, player, hand) => {
+        .useDuration((_itemStack) => 100) // 5 Seconds
+        .use((level, player, _hand) => {
             const playerPos = player.position();
             const block = level.getBlock(
                 playerPos.x() - 1, // Must subtract 1, is it a Bug ???
@@ -77,27 +80,55 @@ StartupEvents.registry("item", (event) => {
                 playerPos.z(),
             );
 
-            if (/** @type {string} */ (block.id) === "kubejs:c4_target") {
-                const itemstack = player.getUseItem();
-
-                const lookAngle = player.lookAngle;
-                lastPlayerInfoMap.set(player.UUID, {
-                    angle: {
-                        x: lookAngle.x(),
-                        y: lookAngle.y(),
-                        z: lookAngle.z(),
-                    },
-                    pos: {
-                        x: playerPos.x(),
-                        y: playerPos.y(),
-                        z: playerPos.z(),
-                    },
-                });
-
-                return true;
-            } else {
+            if (/** @type {string} */ (block.id) !== "kubejs:c4_target") {
                 return false;
             }
+
+            // const itemstack = player.getUseItem();
+            const lookAngle = player.lookAngle;
+            lastPlayerInfoMap[player.uuid.toString()] = {
+                angle: {
+                    x: lookAngle.x(),
+                    y: lookAngle.y(),
+                    z: lookAngle.z(),
+                },
+                pos: {
+                    x: playerPos.x(),
+                    y: playerPos.y(),
+                    z: playerPos.z(),
+                },
+            };
+
+            // console.log(`Map count: ${lastPlayerInfoMap.size}`);
+            console.log(`Player UUID: ${player.uuid}`);
+            console.log(
+                `Player Info: ${lastPlayerInfoMap[player.uuid.toString()]}`,
+            );
+
+            const server = Utils.server;
+            server.scheduleInTicks(5, (event) => {
+                const itemstack = player.getUseItem();
+                if (!shouldActivateC4(itemstack, level, player)) {
+                    player.stopUsingItem();
+                    player.addItemCooldown(itemstack.getItem(), 20);
+                    itemstack.resetHoverName();
+                    return;
+                }
+
+                const useDuration = itemstack.useDuration;
+                if (useDuration <= 0) return;
+                itemstack.setHoverName(
+                    /** @type {any} */ (
+                        Component.literal(
+                            `C4 - ${(useDuration / 20.0).toFixed(2)}s`,
+                        )
+                    ),
+                );
+
+                event.reschedule();
+            });
+
+            return true;
         })
         .finishUsing((itemstack, level, entity) => {
             if (!entity.isPlayer()) {
@@ -125,13 +156,15 @@ StartupEvents.registry("item", (event) => {
                 const explosionRestTime =
                     C4_EXPLOSION_RANGE - gameTime - c4PlacedGameTime;
                 if (explosionRestTime > 0) {
-                    server.tell(
-                        /** @type {Component} */ (
-                            Component.literal(
-                                `C4还剩 ${Math.floor(explosionRestTime / 20)} 秒`,
-                            )
-                        ),
-                    );
+                    server.players.forEach((player) => {
+                        player.tell(
+                            /** @type {any} */ (
+                                Component.literal(
+                                    `C4还剩 ${Math.floor(explosionRestTime / 20)} 秒爆炸`,
+                                )
+                            ),
+                        );
+                    });
                     event.reschedule(20);
                 } else {
                     const blockPos = newBlock.pos;
@@ -148,41 +181,22 @@ StartupEvents.registry("item", (event) => {
 
             return itemstack;
         })
-        .releaseUsing((itemstack, level, entity, count) => {
+        .releaseUsing((itemstack, _level, entity, _count) => {
             itemstack.resetHoverName();
             if (!entity.isPlayer()) return;
-            lastPlayerInfoMap.delete(entity.UUID);
+            delete lastPlayerInfoMap[entity.uuid.toString()];
         })
         .displayName(/** @type {any} */ ("C4"));
 });
 
-let useItemTickCnt = 0;
-const useItemTickInterval = 5;
+const EXAMPLE_MAPPING = new KeyMapping(
+    "key.examplemod.example1", // Will be localized using this translation key
+    69, // Default key is E
+    "key.categories.misc", // Mapping will be in the misc category
+);
 ForgeEvents.onEvent(
-    "net.minecraftforge.event.entity.living.LivingEntityUseItemEvent$Tick",
+    "net.minecraftforge.client.event.RegisterKeyMappingsEvent",
     (event) => {
-        // Check every 5 ticks (0.25s)
-        if (useItemTickCnt++ % useItemTickInterval !== 0) return;
-
-        const itemstack = event.getItem();
-        if (/** @type {string} */ (itemstack.id) !== "kubejs:c4_item") return;
-
-        if (
-            !shouldActivateC4(
-                itemstack,
-                event.entity.level,
-                /** @type {any} */ (event.entity),
-            )
-        ) {
-            event.setCanceled(true);
-        }
-
-        const useDuration = event.duration;
-        if (useDuration <= 0) return;
-        itemstack.setHoverName(
-            /** @type {any} */ (
-                Component.literal(`C4 - ${(useDuration / 20.0).toFixed(2)}s`)
-            ),
-        );
+        event.register(EXAMPLE_MAPPING);
     },
 );

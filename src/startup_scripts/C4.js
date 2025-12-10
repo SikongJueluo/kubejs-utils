@@ -1,7 +1,7 @@
 const KeyMapping = Java.loadClass("net.minecraft.client.KeyMapping");
 
 const C4_EXPLOSION_TIME = 3 * 20; // 3 seconds in ticks
-const C4_EXPLOSION_POWER = 4; // Explosion power (TNT is 4)
+const C4_EXPLOSION_POWER = 128; // Explosion power (TNT is 4)
 
 // Tolerance for floating point comparison
 const ANGLE_TOLERANCE = 0.001;
@@ -104,9 +104,9 @@ function shouldActivateC4(itemstack, level, player) {
         isBlockPosChanged || isPosChanged || isAngleChanged;
 
     return (
-        /** @type {string} */ (block.id) === "kubejs:c4_target" &&
+        block.id === "kubejs:c4_target" &&
         !isPlayerInfoChanged &&
-        /** @type {string} */ (itemstack.id) === "kubejs:c4_item"
+        itemstack.id === "kubejs:c4_item"
     );
 }
 
@@ -146,13 +146,18 @@ StartupEvents.registry("item", (event) => {
                 blockUnder.z,
             );
 
-            if (/** @type {string} */ (block.id) !== "kubejs:c4_target") {
+            if (block.id !== "kubejs:c4_target") {
                 return false;
+            }
+
+            const playerUuid = player.uuid.toString();
+            if (lastPlayerInfoMap[playerUuid] !== undefined) {
+                return true;
             }
 
             const playerPos = player.position();
             const lookAngle = player.lookAngle;
-            lastPlayerInfoMap[player.uuid.toString()] = {
+            lastPlayerInfoMap[playerUuid] = {
                 angle: {
                     x: lookAngle.x(),
                     y: lookAngle.y(),
@@ -166,52 +171,10 @@ StartupEvents.registry("item", (event) => {
                 blockPos: blockUnder,
             };
 
-            console.log(`Player UUID: ${player.uuid}`);
-            console.log(
-                `Player Info: ${JSON.stringify(lastPlayerInfoMap[player.uuid.toString()])}`,
-            );
-
-            const server = Utils.server;
-            server.scheduleInTicks(5, (event) => {
-                const itemstack = player.getUseItem();
-
-                // Check if player is still using the item
-                if (
-                    itemstack === undefined ||
-                    /** @type {string} */ (itemstack.id) !== "kubejs:c4_item"
-                ) {
-                    return;
-                }
-
-                if (!shouldActivateC4(itemstack, level, player)) {
-                    player.stopUsingItem();
-                    player.addItemCooldown(itemstack.getItem(), 20);
-                    itemstack.resetHoverName();
-                    delete lastPlayerInfoMap[player.uuid.toString()];
-                    return;
-                }
-
-                // Get remaining ticks for this use
-                const ticksUsingItem = player.getTicksUsingItem();
-                const remainingTicks = 100 - ticksUsingItem; // useDuration is 100
-
-                // if (remainingTicks <= 0) return;
-
-                itemstack.setHoverName(
-                    /** @type {any} */ (
-                        Component.literal(
-                            `C4 - ${(remainingTicks / 20.0).toFixed(2)}s`,
-                        )
-                    ),
-                );
-
-                event.reschedule();
-            });
-
             return true;
         })
         .finishUsing((itemstack, level, entity) => {
-            if (!entity.isPlayer()) {
+            if (!entity.isPlayer() || entity.uuid === undefined) {
                 itemstack.shrink(1);
                 return itemstack;
             }
@@ -244,62 +207,84 @@ StartupEvents.registry("item", (event) => {
             delete lastPlayerInfoMap[player.uuid.toString()];
 
             const server = level.server;
-            const c4PlacedGameTime = level.levelData.getGameTime();
 
-            // Store block position for explosion (capture in closure)
-            const explosionX = c4BlockPos.x;
-            const explosionY = c4BlockPos.y;
-            const explosionZ = c4BlockPos.z;
-
-            server.scheduleInTicks(20, (event) => {
-                const currentGameTime = level.levelData.getGameTime();
-                const elapsedTime = currentGameTime - c4PlacedGameTime;
-                const explosionRestTime = C4_EXPLOSION_TIME - elapsedTime;
-
-                if (explosionRestTime > 0) {
+            for (let i = 0; i < C4_EXPLOSION_TIME; i += 20) {
+                server.scheduleInTicks(i, (event) => {
                     server.players.forEach((p) => {
                         p.tell(
                             /** @type {any} */ (
                                 Component.literal(
-                                    `C4还剩 ${Math.ceil(explosionRestTime / 20)} 秒爆炸`,
+                                    `C4还剩 ${(C4_EXPLOSION_TIME - event.timer) / 20} 秒爆炸`,
                                 )
                             ),
                         );
                     });
-                    event.reschedule();
-                } else {
-                    // Check if C4 block is still there before exploding
-                    const c4Block = level.getBlock(
-                        explosionX,
-                        explosionY,
-                        explosionZ,
-                    );
-                    if (/** @type {string} */ (c4Block.id) === "kubejs:c4") {
-                        // Remove the C4 block first
-                        c4Block.set(/** @type {any} */ ("minecraft:air"));
+                });
+            }
 
-                        // Create explosion
-                        level.explode(
-                            /** @type {any} */ (null),
-                            explosionX + 0.5,
-                            explosionY + 0.5,
-                            explosionZ + 0.5,
-                            C4_EXPLOSION_POWER,
-                            "block",
-                        );
-                    }
-                }
+            // Create explosion
+            server.scheduleInTicks(C4_EXPLOSION_TIME, (_) => {
+                level.explode(
+                    /** @type {any} */ (null),
+                    newBlock.pos.x,
+                    newBlock.pos.y,
+                    newBlock.pos.z,
+                    C4_EXPLOSION_POWER,
+                    "block",
+                );
             });
 
             return itemstack;
         })
         .releaseUsing((itemstack, _level, entity, _count) => {
             itemstack.resetHoverName();
-            if (!entity.isPlayer()) return;
+            if (!entity.isPlayer() || entity.uuid === undefined) return;
             delete lastPlayerInfoMap[entity.uuid.toString()];
         })
         .displayName(/** @type {any} */ ("C4"));
 });
+
+let useItemTickCnt = 0;
+const useItemTickInterval = 5;
+ForgeEvents.onEvent(
+    "net.minecraftforge.event.entity.living.LivingEntityUseItemEvent$Tick",
+    (event) => {
+        // Check every 5 ticks (0.25s)
+        if (useItemTickCnt++ % useItemTickInterval !== 0) {
+            return;
+        }
+
+        const itemstack = event.item;
+        if (
+            !event.entity.isPlayer() ||
+            event.entity.uuid === undefined ||
+            itemstack === undefined ||
+            itemstack.id !== "kubejs:c4_item"
+        ) {
+            return;
+        }
+
+        const player = event.entity.level.getPlayerByUUID(event.entity.uuid);
+
+        if (!shouldActivateC4(itemstack, player.level, player)) {
+            player.stopUsingItem();
+            player.addItemCooldown(itemstack.item, 20);
+            itemstack.resetHoverName();
+            delete lastPlayerInfoMap[player.uuid.toString()];
+            event.setCanceled(true);
+            return;
+        }
+
+        // Get remaining ticks for this use
+        const remainingTicks = event.duration;
+
+        itemstack.setHoverName(
+            /** @type {any} */ (
+                Component.literal(`C4 - ${(remainingTicks / 20.0).toFixed(2)}s`)
+            ),
+        );
+    },
+);
 
 const EXAMPLE_MAPPING = new KeyMapping(
     "key.examplemod.example1", // Will be localized using this translation key
@@ -310,5 +295,20 @@ ForgeEvents.onEvent(
     "net.minecraftforge.client.event.RegisterKeyMappingsEvent",
     (event) => {
         event.register(EXAMPLE_MAPPING);
+    },
+);
+
+/**
+ * WARNING: Must Do!!!
+ * Because Kubejs scheduler is not stable
+ * And need to fire once at first time
+ * Relative Issue: https://github.com/KubeJS-Mods/KubeJS/issues/763
+ */
+ForgeEvents.onEvent(
+    "net.minecraftforge.event.server.ServerStartedEvent",
+    (event) => {
+        event.server.scheduleInTicks(1, (_) => {
+            console.log("Init Scheduler");
+        });
     },
 );

@@ -1,5 +1,5 @@
 sync-js:
-    rsync --delete -r --exclude=config ./src/ "$(cygpath -u $DST_KJS_DIR)/"
+    rsync -av --delete -r --exclude=config --exclude=probe ./src/ "$(cygpath -u $DST_KJS_DIR)/"
 
-sync-log:
-    rsync --delete -r "$(cygpath -u $DST_LOG_DIR)/" ./logs/
+sync-logs:
+    rsync -av --delete -r "$(cygpath -u $DST_LOG_DIR)/" ./logs/

@@ -3,3 +3,5 @@ build
 output
 
 .ai
+.env.local
+logs

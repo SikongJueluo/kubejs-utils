@@ -1,11 +1,14 @@
-const KeyMapping = Java.loadClass("net.minecraft.client.KeyMapping");
-
 const C4_EXPLOSION_TIME = 3 * 20; // 3 seconds in ticks
 const C4_EXPLOSION_POWER = 128; // Explosion power (TNT is 4)
 
 // Tolerance for floating point comparison
 const ANGLE_TOLERANCE = 0.001;
 const POS_TOLERANCE = 0.01;
+
+/**
+ * @type {Internal.KeyMapping | undefined}
+ */
+let operationKeyMapping;
 
 /**
  * @type {{ [key: string]:{
@@ -208,6 +211,11 @@ StartupEvents.registry("item", (event) => {
 
             const server = level.server;
 
+            /**
+             * TODO: It should use reschedule to replace serveral schedules
+             * But reschedule not work at current time.
+             * Relative Issue: https://github.com/KubeJS-Mods/KubeJS/issues/763
+             */
             for (let i = 0; i < C4_EXPLOSION_TIME; i += 20) {
                 server.scheduleInTicks(i, (event) => {
                     server.players.forEach((p) => {
@@ -244,16 +252,10 @@ StartupEvents.registry("item", (event) => {
         .displayName(/** @type {any} */ ("C4"));
 });
 
-let useItemTickCnt = 0;
-const useItemTickInterval = 5;
+// Client side
 ForgeEvents.onEvent(
     "net.minecraftforge.event.entity.living.LivingEntityUseItemEvent$Tick",
     (event) => {
-        // Check every 5 ticks (0.25s)
-        if (useItemTickCnt++ % useItemTickInterval !== 0) {
-            return;
-        }
-
         const itemstack = event.item;
         if (
             !event.entity.isPlayer() ||
@@ -286,15 +288,44 @@ ForgeEvents.onEvent(
     },
 );
 
-const EXAMPLE_MAPPING = new KeyMapping(
-    "key.examplemod.example1", // Will be localized using this translation key
-    69, // Default key is E
-    "key.categories.misc", // Mapping will be in the misc category
-);
+// Register keybindings during client initialization
+// Client side
+ClientEvents.init(() => {
+    // Load required Java classes
+    const KeyMappingRegistry = Java.loadClass(
+        "dev.architectury.registry.client.keymappings.KeyMappingRegistry",
+    );
+    const KeyMapping = Java.loadClass("net.minecraft.client.KeyMapping");
+    const GLFW = Java.loadClass("org.lwjgl.glfw.GLFW");
+
+    // Create the KeyMapping
+    // Parameters:
+    //   1. Translation key for the key name (shown in controls menu)
+    //   2. GLFW key code (default key)
+    //   3. Translation key for the category
+    operationKeyMapping = new KeyMapping(
+        "key.kubejs.example", // Will be localized using this translation key
+        GLFW.GLFW_KEY_G, // Default key is G
+        "key.categories.kubejs", // Custom category for KubeJS keybindings
+    );
+
+    // Register the KeyMapping using Architectury's registry
+    KeyMappingRegistry.register(operationKeyMapping);
+});
+
+// Send data to the server when the key is pressed
+// Client side
 ForgeEvents.onEvent(
-    "net.minecraftforge.client.event.RegisterKeyMappingsEvent",
+    "net.minecraftforge.event.TickEvent$PlayerTickEvent",
     (event) => {
-        event.register(EXAMPLE_MAPPING);
+        if (operationKeyMapping === undefined) {
+            console.warn("Not in client platform");
+            return;
+        }
+
+        while (operationKeyMapping.consumeClick()) {
+            event.player.sendData("keyClick", operationKeyMapping.name);
+        }
     },
 );
 

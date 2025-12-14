@@ -1,14 +1,26 @@
 /**
+ * @typedef {{
+ *   level: Internal.Level,
+ *   blockPos: {x: number, y: number, z: number},
+ *   player: Internal.Player,
+ *   explosionTime: number,
+ *   explosionPower: number
+ * }} C4ActivatedEvent
+ */
+
+/**
  * @typedef {(
  *   "PlayerItemFishedEvent" |
- *   "LivingEntityUseItemEvent$Finish"
+ *   "LivingEntityUseItemEvent$Finish" |
+ *   "C4Activated"
  * )} EventName
  */
 
 /**
  * @typedef {(
  *   ((event: Internal.ItemFishedEvent) => any) |
- *   ((event: Internal.LivingEntityUseItemEvent$Finish) => any)
+ *   ((event: Internal.LivingEntityUseItemEvent$Finish) => any) |
+ *   ((event: C4ActivatedEvent) => any)
  * )} EventCallback
  */
 
@@ -39,6 +51,13 @@ const eventBus = {
      */
     /**
      * Registers a callback function for a specific event.
+     * @overload
+     * @param {"C4Activated"} eventName - The name of the event to listen for.
+     * @param {(event: C4ActivatedEvent) => any} callback - The callback function.
+     * @returns {void}
+     */
+    /**
+     * Registers a callback function for a specific event.
      * @param {EventName} eventName - The name of the event to listen for.
      * @param {EventCallback} callback - The callback function to execute when the event is emitted.
      * @returns {void}
@@ -48,17 +67,24 @@ const eventBus = {
     },
 
     /**
-     * Registers a callback function for a specific event.
+     * Emits an event, calling the registered callback function if it exists.
      * @overload
-     * @param {"PlayerItemFishedEvent"} eventName - The name of the event to listen for.
-     * @param {(event: Internal.ItemFishedEvent) => any} callback - The callback function.
-     * @returns {void}
+     * @param {"PlayerItemFishedEvent"} eventName - The name of the event to emit.
+     * @param {Internal.ItemFishedEvent} event - The event data.
+     * @returns {any}
      */
     /**
      * Emits an event, calling the registered callback function if it exists.
      * @overload
      * @param {"LivingEntityUseItemEvent$Finish"} eventName - The name of the event to emit.
      * @param {Internal.LivingEntityUseItemEvent$Finish} event - The event data.
+     * @returns {any}
+     */
+    /**
+     * Emits an event, calling the registered callback function if it exists.
+     * @overload
+     * @param {"C4Activated"} eventName - The name of the event to emit.
+     * @param {C4ActivatedEvent} event - The event data.
      * @returns {any}
      */
     /**
@@ -80,6 +106,8 @@ const eventBus = {
  */
 
 global["eventBus"] = eventBus;
+
+// ==================== Forge Event Listeners ====================
 
 ForgeEvents.onEvent(
     "net.minecraftforge.event.entity.living.LivingEntityUseItemEvent$Finish",

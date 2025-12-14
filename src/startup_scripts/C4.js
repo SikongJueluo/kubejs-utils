@@ -1,5 +1,6 @@
 const C4_EXPLOSION_TIME = 3 * 20; // 3 seconds in ticks
 const C4_EXPLOSION_POWER = 128; // Explosion power (TNT is 4)
+const C4_USE_TIME = 5 * 20; // 5 seconds in ticks
 
 // Tolerance for floating point comparison
 const ANGLE_TOLERANCE = 0.001;
@@ -113,6 +114,45 @@ function shouldActivateC4(itemstack, level, player) {
     );
 }
 
+/**
+ * @param {Internal.Player} player
+ * @param {Internal.Level} level
+ * @returns {boolean}
+ */
+function shouldStartUseC4(player, level) {
+    const blockUnder = getBlockUnderPlayer(player);
+    const block = level.getBlock(blockUnder.x, blockUnder.y, blockUnder.z);
+
+    if (block.id !== "kubejs:c4_target") {
+        return false;
+    }
+
+    const playerUuid = player.uuid.toString();
+    if (lastPlayerInfoMap[playerUuid] !== undefined) {
+        return false;
+    }
+
+    const playerPos = player.position();
+    const lookAngle = player.lookAngle;
+    lastPlayerInfoMap[playerUuid] = {
+        angle: {
+            x: lookAngle.x(),
+            y: lookAngle.y(),
+            z: lookAngle.z(),
+        },
+        pos: {
+            x: playerPos.x(),
+            y: playerPos.y(),
+            z: playerPos.z(),
+        },
+        blockPos: blockUnder,
+    };
+
+    return true;
+}
+
+// ==================== Block Registration ====================
+
 StartupEvents.registry("block", (event) => {
     event
         .create("c4_target") // Create a new block
@@ -135,44 +175,24 @@ StartupEvents.registry("block", (event) => {
         .displayName(/** @type {any} */ ("C4")); // Set a custom name
 });
 
+// ==================== Item Registration ====================
+
 StartupEvents.registry("item", (event) => {
     event
         .create("c4_item")
         .unstackable()
         .useAnimation("eat")
-        .useDuration((_itemStack) => 100) // 5 Seconds
+        .useDuration((_itemStack) => C4_USE_TIME) // 5 Seconds
         .use((level, player, _hand) => {
-            const blockUnder = getBlockUnderPlayer(player);
-            const block = level.getBlock(
-                blockUnder.x,
-                blockUnder.y,
-                blockUnder.z,
-            );
+            if (!shouldStartUseC4(player, level)) return false;
 
-            if (block.id !== "kubejs:c4_target") {
-                return false;
+            /** @type {EventBus} */
+            const eventBus = /** @type {any} */ (global["eventBus"]);
+            if (eventBus !== null) {
+                eventBus.emit("C4UseStarted", { player: player });
+            } else {
+                console.warn("EventBus is not available");
             }
-
-            const playerUuid = player.uuid.toString();
-            if (lastPlayerInfoMap[playerUuid] !== undefined) {
-                return true;
-            }
-
-            const playerPos = player.position();
-            const lookAngle = player.lookAngle;
-            lastPlayerInfoMap[playerUuid] = {
-                angle: {
-                    x: lookAngle.x(),
-                    y: lookAngle.y(),
-                    z: lookAngle.z(),
-                },
-                pos: {
-                    x: playerPos.x(),
-                    y: playerPos.y(),
-                    z: playerPos.z(),
-                },
-                blockPos: blockUnder,
-            };
 
             return true;
         })
@@ -191,56 +211,19 @@ StartupEvents.registry("item", (event) => {
                 return itemstack; // Do nothing
             }
 
-            // Place C4 at player's feet
-            const playerPos = player.position();
-            const c4BlockPos = {
-                x: Math.floor(playerPos.x()),
-                y: Math.floor(playerPos.y()),
-                z: Math.floor(playerPos.z()),
-            };
-            const newBlock = level.getBlock(
-                c4BlockPos.x,
-                c4BlockPos.y,
-                c4BlockPos.z,
-            );
-            newBlock.set(/** @type {any} */ ("kubejs:c4"));
-
             itemstack.shrink(1);
-            itemstack.resetHoverName();
-            delete lastPlayerInfoMap[player.uuid.toString()];
 
-            const server = level.server;
-
-            /**
-             * TODO: It should use reschedule to replace serveral schedules
-             * But reschedule not work at current time.
-             * Relative Issue: https://github.com/KubeJS-Mods/KubeJS/issues/763
-             */
-            for (let i = 0; i < C4_EXPLOSION_TIME; i += 20) {
-                server.scheduleInTicks(i, (event) => {
-                    server.players.forEach((p) => {
-                        p.tell(
-                            /** @type {any} */ (
-                                Component.literal(
-                                    `C4还剩 ${(C4_EXPLOSION_TIME - event.timer) / 20} 秒爆炸`,
-                                )
-                            ),
-                        );
-                    });
+            // Emit custom event to server_scripts for explosion logic
+            /** @type {EventBus} */
+            const eventBus = /** @type {any} */ (global["eventBus"]);
+            if (eventBus !== null) {
+                eventBus.emit("C4Activated", {
+                    level: level,
+                    player: player,
+                    explosionTime: C4_EXPLOSION_TIME,
+                    explosionPower: C4_EXPLOSION_POWER,
                 });
             }
-
-            // Create explosion
-            server.scheduleInTicks(C4_EXPLOSION_TIME, (_) => {
-                level.explode(
-                    /** @type {any} */ (null),
-                    newBlock.pos.x,
-                    newBlock.pos.y,
-                    newBlock.pos.z,
-                    C4_EXPLOSION_POWER,
-                    "block",
-                );
-            });
 
             return itemstack;
         })
@@ -252,44 +235,9 @@ StartupEvents.registry("item", (event) => {
         .displayName(/** @type {any} */ ("C4"));
 });
 
-// Client side
-ForgeEvents.onEvent(
-    "net.minecraftforge.event.entity.living.LivingEntityUseItemEvent$Tick",
-    (event) => {
-        const itemstack = event.item;
-        if (
-            !event.entity.isPlayer() ||
-            event.entity.uuid === undefined ||
-            itemstack === undefined ||
-            itemstack.id !== "kubejs:c4_item"
-        ) {
-            return;
-        }
-
-        const player = event.entity.level.getPlayerByUUID(event.entity.uuid);
-
-        if (!shouldActivateC4(itemstack, player.level, player)) {
-            player.stopUsingItem();
-            player.addItemCooldown(itemstack.item, 20);
-            itemstack.resetHoverName();
-            delete lastPlayerInfoMap[player.uuid.toString()];
-            event.setCanceled(true);
-            return;
-        }
-
-        // Get remaining ticks for this use
-        const remainingTicks = event.duration;
-
-        itemstack.setHoverName(
-            /** @type {any} */ (
-                Component.literal(`C4 - ${(remainingTicks / 20.0).toFixed(2)}s`)
-            ),
-        );
-    },
-);
+// ==================== Client Side Logic ====================
 
 // Register keybindings during client initialization
-// Client side
 ClientEvents.init(() => {
     // Load required Java classes
     const KeyMappingRegistry = Java.loadClass(
@@ -314,7 +262,6 @@ ClientEvents.init(() => {
 });
 
 // Send data to the server when the key is pressed
-// Client side
 ForgeEvents.onEvent(
     "net.minecraftforge.event.TickEvent$PlayerTickEvent",
     (event) => {
@@ -324,22 +271,154 @@ ForgeEvents.onEvent(
         }
 
         while (operationKeyMapping.consumeClick()) {
-            event.player.sendData("keyClick", operationKeyMapping.name);
+            const player = event.player;
+            const level = player.level;
+            if (!shouldStartUseC4(player, level)) continue;
+
+            /** @type {EventBus} */
+            const eventBus = /** @type {any} */ (global["eventBus"]);
+            if (eventBus !== null) {
+                eventBus.emit("C4UseStarted", { player: player });
+            } else {
+                console.warn("EventBus is not available");
+            }
         }
     },
 );
 
+// ==================== Server Side Logic ====================
+
 /**
- * WARNING: Must Do!!!
- * Because Kubejs scheduler is not stable
- * And need to fire once at first time
- * Relative Issue: https://github.com/KubeJS-Mods/KubeJS/issues/763
+ * @param {{player: Internal.Player}} event
  */
+function handleC4UseStarted(event) {
+    const server = Utils.server;
+    if (server === null) {
+        console.error("C4 Handler: Server is not available");
+        return;
+    }
+
+    const player = server.getPlayer(event.player.uuid);
+    const level = player.level;
+
+    const startTime = level.levelData.gameTime;
+    const originalItemstack = player.mainHandItem;
+
+    server.scheduleRepeatingInTicks(2, (event) => {
+        const itemstack = player.getMainHandItem();
+
+        if (!shouldActivateC4(itemstack, player.level, player)) {
+            player.stopUsingItem();
+            player.addItemCooldown(originalItemstack.item, 20);
+            originalItemstack.releaseUsing(
+                level,
+                /** @type {any} */ (player),
+                originalItemstack.count,
+            );
+            event.clear();
+            return;
+        }
+
+        // Get remaining ticks for this use
+        const remainingTicks =
+            C4_USE_TIME - (level.levelData.gameTime - startTime);
+
+        if (remainingTicks <= 0) {
+            originalItemstack.finishUsingItem(
+                level,
+                /** @type {any} */ (player),
+            );
+            delete lastPlayerInfoMap[player.uuid.toString()];
+            event.clear();
+            return;
+        }
+
+        itemstack.setHoverName(
+            /** @type {any} */ (
+                Component.literal(`C4 - ${(remainingTicks / 20.0).toFixed(1)}s`)
+            ),
+        );
+    });
+}
+
+/**
+ * Handle C4 activation event
+ * @param {C4ActivatedEvent} event
+ */
+function handleC4Activated(event) {
+    const server = Utils.server;
+    if (server === null) {
+        console.error("C4 Handler: Server is not available");
+        return;
+    }
+
+    const { level, player, explosionTime, explosionPower } = event;
+
+    // Place C4 at player's feet
+    const playerPos = player.position();
+    const c4BlockPos = {
+        x: Math.floor(playerPos.x()),
+        y: Math.floor(playerPos.y()),
+        z: Math.floor(playerPos.z()),
+    };
+    const newBlock = level.getBlock(c4BlockPos.x, c4BlockPos.y, c4BlockPos.z);
+    newBlock.set(/** @type {any} */ ("kubejs:c4"));
+
+    /**
+     * TODO: It should use reschedule to replace several schedules
+     * But reschedule not work at current time.
+     * Relative Issue: https://github.com/KubeJS-Mods/KubeJS/issues/763
+     */
+    for (let i = 0; i < explosionTime; i += 20) {
+        server.scheduleInTicks(i, (scheduledEvent) => {
+            const remainingSeconds =
+                (explosionTime - scheduledEvent.timer) / 20;
+            server.players.forEach((p) => {
+                p.tell(
+                    /** @type {any} */ (
+                        Component.literal(`C4还剩 ${remainingSeconds} 秒爆炸`)
+                    ),
+                );
+            });
+        });
+    }
+
+    // Create explosion after countdown
+    server.scheduleInTicks(explosionTime, (_) => {
+        level.explode(
+            /** @type {any} */ (null),
+            c4BlockPos.x + 0.5,
+            c4BlockPos.y + 0.5,
+            c4BlockPos.z + 0.5,
+            explosionPower,
+            "block",
+        );
+    });
+}
+
 ForgeEvents.onEvent(
     "net.minecraftforge.event.server.ServerStartedEvent",
     (event) => {
+        /**
+         * WARNING: Must Do!!!
+         * Because Kubejs scheduler is not stable
+         * And need to fire once at first time
+         * Relative Issue: https://github.com/KubeJS-Mods/KubeJS/issues/763
+         */
         event.server.scheduleInTicks(1, (_) => {
             console.log("Init Scheduler");
         });
+
+        /** @type {EventBus} */
+        const eventBus = /** @type {any} */ (global["eventBus"]);
+
+        if (eventBus === null) {
+            console.error("C4 Handler: eventBus is not available");
+            return;
+        }
+
+        eventBus.register("C4Activated", handleC4Activated);
+        eventBus.register("C4UseStarted", handleC4UseStarted);
+        console.log("C4 Handler: Registered C4Activated event handler");
     },
 );

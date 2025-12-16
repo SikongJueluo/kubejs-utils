@@ -5,3 +5,4 @@ output
 .ai
 .env.local
 logs
+types/probe

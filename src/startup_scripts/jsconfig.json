@@ -1,0 +1,8 @@
+{
+  "$schema": "https://www.schemastore.org/jsconfig.json",
+  "extends": "../../jsconfig.json",
+  "compilerOptions": {
+    "typeRoots": ["../../types/probe/startup/probe-types/"]
+  },
+  "include": ["./**/*", "../../types/*.d.ts"]
+}

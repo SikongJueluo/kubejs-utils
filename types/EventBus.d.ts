@@ -10,7 +10,6 @@ interface C4UseStartedEvent {
  */
 interface C4ActivatedEvent {
     level: Internal.Level;
-    blockPos: { x: number; y: number; z: number };
     player: Internal.Player;
     explosionTime: number;
     explosionPower: number;

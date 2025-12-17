@@ -158,8 +158,7 @@ StartupEvents.registry("block", (event) => {
         .create("c4_target") // Create a new block
         .soundType(SoundType.WOOD) // Set a material (affects the sounds and some properties)
         .unbreakable()
-        .textureAll("minecraft:block/target_top")
-        .displayName(/** @type {any} */ ("C4 Target Block")); // Set a custom name
+        .textureAll("minecraft:block/target_top");
 });
 
 StartupEvents.registry("block", (event) => {
@@ -171,8 +170,7 @@ StartupEvents.registry("block", (event) => {
         .noItem() // Player cannot hold or place the item
         .noDrops()
         .noCollision() // Set no hitbox
-        .textureAll("minecraft:block/tnt_top")
-        .displayName(/** @type {any} */ ("C4")); // Set a custom name
+        .textureAll("minecraft:block/tnt_top");
 });
 
 // ==================== Item Registration ====================
@@ -231,8 +229,7 @@ StartupEvents.registry("item", (event) => {
             itemstack.resetHoverName();
             if (!entity.isPlayer() || entity.uuid === undefined) return;
             delete lastPlayerInfoMap[entity.uuid.toString()];
-        })
-        .displayName(/** @type {any} */ ("C4"));
+        });
 });
 
 // ==================== Client Side Logic ====================
@@ -346,7 +343,7 @@ function handleC4UseStarted(event) {
  * @param {C4ActivatedEvent} event
  */
 function handleC4Activated(event) {
-    const server = Utils.server;
+    const server = Utils.getServer();
     if (server === null) {
         console.error("C4 Handler: Server is not available");
         return;

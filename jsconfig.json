@@ -9,18 +9,6 @@
     "noImplicitAny": true,
     "esModuleInterop": true,
     "moduleResolution": "bundler",
-    "forceConsistentCasingInFileNames": true,
-    "rootDirs": [
-      "src/server_scripts",
-      "src/startup_scripts",
-      "src/client_scripts",
-      "src/lib"
-    ],
-    "typeRoots": [
-      "./types/probe/user",
-      "./types/probe/generated",
-      "./types/probe/generated/internals"
-    ]
-  },
-  "include": ["./src/**/*.js", "./types/**/*.d.ts"]
+    "forceConsistentCasingInFileNames": true
+  }
 }

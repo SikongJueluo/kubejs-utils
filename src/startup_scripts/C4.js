@@ -1,3 +1,12 @@
+/** @type {JClass_<$TickEvent$PlayerTickEvent_>} */
+const $TickEvent$PlayerTickEvent = Java.loadClass(
+    "net.minecraftforge.event.TickEvent$PlayerTickEvent",
+);
+
+const $ServerStartedEvent = Java.loadClass(
+    "net.minecraftforge.event.server.ServerStartedEvent",
+);
+
 const C4_EXPLOSION_TIME = 3 * 20; // 3 seconds in ticks
 const C4_EXPLOSION_POWER = 128; // Explosion power (TNT is 4)
 const C4_USE_TIME = 5 * 20; // 5 seconds in ticks
@@ -36,12 +45,11 @@ function isApproximatelyEqual(a, b, tolerance) {
  * @param {Internal.Player} player
  * @returns {{x: number, y: number, z: number}}
  */
-function getBlockUnderPlayer(player) {
-    const playerPos = player.position();
+function getFeetBlockPosition(player) {
     return {
-        x: Math.floor(playerPos.x()),
-        y: Math.floor(playerPos.y()) - 1,
-        z: Math.floor(playerPos.z()),
+        x: Math.floor(player.x),
+        y: Math.floor(player.y) - 1,
+        z: Math.floor(player.z),
     };
 }
 
@@ -52,17 +60,16 @@ function getBlockUnderPlayer(player) {
  * @returns {boolean}
  */
 function shouldActivateC4(itemstack, level, player) {
-    const blockUnder = getBlockUnderPlayer(player);
+    const blockUnder = getFeetBlockPosition(player);
     const block = level.getBlock(blockUnder.x, blockUnder.y, blockUnder.z);
 
     const lookAngle = player.lookAngle;
-    const playerPos = player.position();
     const lastPlayerInfo = lastPlayerInfoMap[player.uuid.toString()];
 
     if (lastPlayerInfo === undefined) return false;
 
     // Check if player moved (using block position for stability)
-    const currentBlockPos = getBlockUnderPlayer(player);
+    const currentBlockPos = getFeetBlockPosition(player);
     const isBlockPosChanged =
         currentBlockPos.x !== lastPlayerInfo.blockPos.x ||
         currentBlockPos.y !== lastPlayerInfo.blockPos.y ||
@@ -70,36 +77,24 @@ function shouldActivateC4(itemstack, level, player) {
 
     // Check if player moved within the same block (with tolerance)
     const isPosChanged =
-        !isApproximatelyEqual(
-            playerPos.x(),
-            lastPlayerInfo.pos.x,
-            POS_TOLERANCE,
-        ) ||
-        !isApproximatelyEqual(
-            playerPos.y(),
-            lastPlayerInfo.pos.y,
-            POS_TOLERANCE,
-        ) ||
-        !isApproximatelyEqual(
-            playerPos.z(),
-            lastPlayerInfo.pos.z,
-            POS_TOLERANCE,
-        );
+        !isApproximatelyEqual(player.x, lastPlayerInfo.pos.x, POS_TOLERANCE) ||
+        !isApproximatelyEqual(player.y, lastPlayerInfo.pos.y, POS_TOLERANCE) ||
+        !isApproximatelyEqual(player.z, lastPlayerInfo.pos.z, POS_TOLERANCE);
 
     // Check if player rotated view (with tolerance)
     const isAngleChanged =
         !isApproximatelyEqual(
-            lookAngle.x(),
+            lookAngle.get("x"),
             lastPlayerInfo.angle.x,
             ANGLE_TOLERANCE,
         ) ||
         !isApproximatelyEqual(
-            lookAngle.y(),
+            lookAngle.get("y"),
             lastPlayerInfo.angle.y,
             ANGLE_TOLERANCE,
         ) ||
         !isApproximatelyEqual(
-            lookAngle.z(),
+            lookAngle.get("z"),
             lastPlayerInfo.angle.z,
             ANGLE_TOLERANCE,
         );
@@ -120,7 +115,7 @@ function shouldActivateC4(itemstack, level, player) {
  * @returns {boolean}
  */
 function shouldStartUseC4(player, level) {
-    const blockUnder = getBlockUnderPlayer(player);
+    const blockUnder = getFeetBlockPosition(player);
     const block = level.getBlock(blockUnder.x, blockUnder.y, blockUnder.z);
 
     if (block.id !== "kubejs:c4_target") {
@@ -132,18 +127,17 @@ function shouldStartUseC4(player, level) {
         return false;
     }
 
-    const playerPos = player.position();
     const lookAngle = player.lookAngle;
     lastPlayerInfoMap[playerUuid] = {
         angle: {
-            x: lookAngle.x(),
-            y: lookAngle.y(),
-            z: lookAngle.z(),
+            x: lookAngle.get("x"),
+            y: lookAngle.get("y"),
+            z: lookAngle.get("z"),
         },
         pos: {
-            x: playerPos.x(),
-            y: playerPos.y(),
-            z: playerPos.z(),
+            x: player.x,
+            y: player.y,
+            z: player.z,
         },
         blockPos: blockUnder,
     };
@@ -180,7 +174,7 @@ StartupEvents.registry("item", (event) => {
         .create("c4_item")
         .unstackable()
         .useAnimation("eat")
-        .useDuration((_itemStack) => C4_USE_TIME) // 5 Seconds
+        .useDuration((_itemStack) => C4_USE_TIME)
         .use((level, player, _hand) => {
             if (!shouldStartUseC4(player, level)) return false;
 
@@ -259,29 +253,26 @@ ClientEvents.init(() => {
 });
 
 // Send data to the server when the key is pressed
-ForgeEvents.onEvent(
-    "net.minecraftforge.event.TickEvent$PlayerTickEvent",
-    (event) => {
-        if (operationKeyMapping === undefined) {
-            console.warn("Not in client platform");
-            return;
-        }
+ForgeEvents.onEvent($TickEvent$PlayerTickEvent, (event) => {
+    if (operationKeyMapping === undefined) {
+        console.warn("Not in client platform");
+        return;
+    }
 
-        while (operationKeyMapping.consumeClick()) {
-            const player = event.player;
-            const level = player.level;
-            if (!shouldStartUseC4(player, level)) continue;
+    while (operationKeyMapping.consumeClick()) {
+        const player = event.player;
+        const level = player.level;
+        if (!shouldStartUseC4(player, level)) continue;
 
-            /** @type {EventBus} */
-            const eventBus = /** @type {any} */ (global["eventBus"]);
-            if (eventBus !== null) {
-                eventBus.emit("C4UseStarted", { player: player });
-            } else {
-                console.warn("EventBus is not available");
-            }
+        /** @type {EventBus} */
+        const eventBus = /** @type {any} */ (global["eventBus"]);
+        if (eventBus !== null) {
+            eventBus.emit("C4UseStarted", { player: player });
+        } else {
+            console.warn("EventBus is not available");
         }
-    },
-);
+    }
+});
 
 // ==================== Server Side Logic ====================
 
@@ -289,13 +280,13 @@ ForgeEvents.onEvent(
  * @param {{player: Internal.Player}} event
  */
 function handleC4UseStarted(event) {
-    const server = Utils.server;
+    const server = Utils.getServer();
     if (server === null) {
         console.error("C4 Handler: Server is not available");
         return;
     }
 
-    const player = server.getPlayer(event.player.uuid);
+    const player = server.getPlayerList().getPlayer(event.player.uuid);
     const level = player.level;
 
     const startTime = level.levelData.gameTime;
@@ -304,7 +295,13 @@ function handleC4UseStarted(event) {
     server.scheduleRepeatingInTicks(2, (event) => {
         const itemstack = player.getMainHandItem();
 
-        if (!shouldActivateC4(itemstack, player.level, player)) {
+        if (
+            !shouldActivateC4(
+                itemstack,
+                player.level,
+                /** @type {any} */ (player),
+            )
+        ) {
             player.stopUsingItem();
             player.addItemCooldown(originalItemstack.item, 20);
             originalItemstack.releaseUsing(
@@ -352,11 +349,10 @@ function handleC4Activated(event) {
     const { level, player, explosionTime, explosionPower } = event;
 
     // Place C4 at player's feet
-    const playerPos = player.position();
     const c4BlockPos = {
-        x: Math.floor(playerPos.x()),
-        y: Math.floor(playerPos.y()),
-        z: Math.floor(playerPos.z()),
+        x: Math.floor(player.x),
+        y: Math.floor(player.y),
+        z: Math.floor(player.z),
     };
     const newBlock = level.getBlock(c4BlockPos.x, c4BlockPos.y, c4BlockPos.z);
     newBlock.set(/** @type {any} */ ("kubejs:c4"));
@@ -393,29 +389,26 @@ function handleC4Activated(event) {
     });
 }
 
-ForgeEvents.onEvent(
-    "net.minecraftforge.event.server.ServerStartedEvent",
-    (event) => {
-        /**
-         * WARNING: Must Do!!!
-         * Because Kubejs scheduler is not stable
-         * And need to fire once at first time
-         * Relative Issue: https://github.com/KubeJS-Mods/KubeJS/issues/763
-         */
-        event.server.scheduleInTicks(1, (_) => {
-            console.log("Init Scheduler");
-        });
+ForgeEvents.onEvent($ServerStartedEvent, (event) => {
+    /**
+     * WARNING: Must Do!!!
+     * Because Kubejs scheduler is not stable
+     * And need to fire once at first time
+     * Relative Issue: https://github.com/KubeJS-Mods/KubeJS/issues/763
+     */
+    event.server.scheduleInTicks(1, (_) => {
+        console.log("Init Scheduler");
+    });
 
-        /** @type {EventBus} */
-        const eventBus = /** @type {any} */ (global["eventBus"]);
+    /** @type {EventBus} */
+    const eventBus = /** @type {any} */ (global["eventBus"]);
 
-        if (eventBus === null) {
-            console.error("C4 Handler: eventBus is not available");
-            return;
-        }
+    if (eventBus === null) {
+        console.error("C4 Handler: eventBus is not available");
+        return;
+    }
 
-        eventBus.register("C4Activated", handleC4Activated);
-        eventBus.register("C4UseStarted", handleC4UseStarted);
-        console.log("C4 Handler: Registered C4Activated event handler");
-    },
-);
+    eventBus.register("C4Activated", handleC4Activated);
+    eventBus.register("C4UseStarted", handleC4UseStarted);
+    console.log("C4 Handler: Registered C4Activated event handler");
+});

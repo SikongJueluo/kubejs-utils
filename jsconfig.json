@@ -3,12 +3,12 @@
   "compilerOptions": {
     "lib": ["ES5", "ES2015"],
     "target": "ES2015",
+    "module": "commonjs",
     "strict": true,
     "checkJs": true,
     "skipLibCheck": true,
     "noImplicitAny": true,
     "esModuleInterop": true,
-    "moduleResolution": "bundler",
     "forceConsistentCasingInFileNames": true
   }
 }

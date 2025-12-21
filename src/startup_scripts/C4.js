@@ -1,4 +1,3 @@
-/** @type {JClass_<$TickEvent$PlayerTickEvent_>} */
 const $TickEvent$PlayerTickEvent = Java.loadClass(
     "net.minecraftforge.event.TickEvent$PlayerTickEvent",
 );
@@ -7,7 +6,7 @@ const $ServerStartedEvent = Java.loadClass(
     "net.minecraftforge.event.server.ServerStartedEvent",
 );
 
-const C4_EXPLOSION_TIME = 3 * 20; // 3 seconds in ticks
+const C4_EXPLOSION_TIME = 7 * 20; // 7 seconds in ticks
 const C4_EXPLOSION_POWER = 128; // Explosion power (TNT is 4)
 const C4_USE_TIME = 5 * 20; // 5 seconds in ticks
 
@@ -28,6 +27,12 @@ let operationKeyMapping;
  * } | undefined}}
  */
 const lastPlayerInfoMap = {};
+
+/**
+ * @type {{[key:string]: boolean}}
+ */
+const toExplosionC4Map = {};
+global["toExplosionC4Map"] = toExplosionC4Map;
 
 /**
  * Helper function to compare floating point numbers with tolerance
@@ -253,26 +258,35 @@ ClientEvents.init(() => {
 });
 
 // Send data to the server when the key is pressed
-ForgeEvents.onEvent($TickEvent$PlayerTickEvent, (event) => {
-    if (operationKeyMapping === undefined) {
-        console.warn("Not in client platform");
-        return;
-    }
-
-    while (operationKeyMapping.consumeClick()) {
-        const player = event.player;
-        const level = player.level;
-        if (!shouldStartUseC4(player, level)) continue;
-
-        /** @type {EventBus} */
-        const eventBus = /** @type {any} */ (global["eventBus"]);
-        if (eventBus !== null) {
-            eventBus.emit("C4UseStarted", { player: player });
-        } else {
-            console.warn("EventBus is not available");
+ForgeEvents.onEvent(
+    // @ts-ignore
+    $TickEvent$PlayerTickEvent,
+    /**
+     *
+     * @param {Internal.TickEvent$PlayerTickEvent} event
+     * @returns
+     */
+    (event) => {
+        if (operationKeyMapping === undefined) {
+            console.warn("Not in client platform");
+            return event;
         }
-    }
-});
+
+        while (operationKeyMapping.consumeClick()) {
+            const player = event.player;
+            const level = player.level;
+            if (!shouldStartUseC4(player, level)) continue;
+
+            /** @type {EventBus} */
+            const eventBus = /** @type {any} */ (global["eventBus"]);
+            if (eventBus !== null) {
+                eventBus.emit("C4UseStarted", { player: player });
+            } else {
+                console.warn("EventBus is not available");
+            }
+        }
+    },
+);
 
 // ==================== Server Side Logic ====================
 
@@ -357,27 +371,40 @@ function handleC4Activated(event) {
     const newBlock = level.getBlock(c4BlockPos.x, c4BlockPos.y, c4BlockPos.z);
     newBlock.set(/** @type {any} */ ("kubejs:c4"));
 
+    // Add record
+    const newBlockPosString = newBlock.pos.toShortString();
+    toExplosionC4Map[newBlockPosString] = true;
+
     /**
      * TODO: It should use reschedule to replace several schedules
      * But reschedule not work at current time.
      * Relative Issue: https://github.com/KubeJS-Mods/KubeJS/issues/763
      */
-    for (let i = 0; i < explosionTime; i += 20) {
-        server.scheduleInTicks(i, (scheduledEvent) => {
-            const remainingSeconds =
-                (explosionTime - scheduledEvent.timer) / 20;
-            server.players.forEach((p) => {
-                p.tell(
-                    /** @type {any} */ (
-                        Component.literal(`C4还剩 ${remainingSeconds} 秒爆炸`)
-                    ),
-                );
-            });
+    let remainingSeconds = explosionTime / 20;
+    server.scheduleRepeatingInTicks(20, (scheduledEvent) => {
+        // Assert C4 exsiting
+        if (toExplosionC4Map[newBlockPosString] === null) return;
+
+        remainingSeconds -= 1;
+        if (remainingSeconds <= 0) {
+            scheduledEvent.clear();
+            return scheduledEvent;
+        }
+
+        server.players.forEach((p) => {
+            p.tell(
+                /** @type {any} */ (
+                    Component.literal(`C4还剩 ${remainingSeconds} 秒爆炸`)
+                ),
+            );
         });
-    }
+    });
 
     // Create explosion after countdown
     server.scheduleInTicks(explosionTime, (_) => {
+        // Assert C4 exsiting
+        if (toExplosionC4Map[newBlockPosString] === null) return;
+
         level.explode(
             /** @type {any} */ (null),
             c4BlockPos.x + 0.5,
@@ -389,26 +416,35 @@ function handleC4Activated(event) {
     });
 }
 
-ForgeEvents.onEvent($ServerStartedEvent, (event) => {
+ForgeEvents.onEvent(
+    //@ts-ignore
+    $ServerStartedEvent,
     /**
-     * WARNING: Must Do!!!
-     * Because Kubejs scheduler is not stable
-     * And need to fire once at first time
-     * Relative Issue: https://github.com/KubeJS-Mods/KubeJS/issues/763
+     *
+     * @param {Internal.ServerStartedEvent} event
+     * @returns
      */
-    event.server.scheduleInTicks(1, (_) => {
-        console.log("Init Scheduler");
-    });
+    (event) => {
+        /**
+         * WARNING: Must Do!!!
+         * Because Kubejs scheduler is not stable
+         * And need to fire once at first time
+         * Relative Issue: https://github.com/KubeJS-Mods/KubeJS/issues/763
+         */
+        event.server.scheduleInTicks(1, (_) => {
+            console.log("Init Scheduler");
+        });
 
-    /** @type {EventBus} */
-    const eventBus = /** @type {any} */ (global["eventBus"]);
+        /** @type {EventBus} */
+        const eventBus = /** @type {any} */ (global["eventBus"]);
 
-    if (eventBus === null) {
-        console.error("C4 Handler: eventBus is not available");
-        return;
-    }
+        if (eventBus === null) {
+            console.error("C4 Handler: eventBus is not available");
+            return event;
+        }
 
-    eventBus.register("C4Activated", handleC4Activated);
-    eventBus.register("C4UseStarted", handleC4UseStarted);
-    console.log("C4 Handler: Registered C4Activated event handler");
-});
+        eventBus.register("C4Activated", handleC4Activated);
+        eventBus.register("C4UseStarted", handleC4UseStarted);
+        console.log("C4 Handler: Registered C4Activated event handler");
+    },
+);

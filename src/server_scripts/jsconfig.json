@@ -1,10 +1,19 @@
 {
   "$schema": "https://www.schemastore.org/jsconfig.json",
   "extends": "../../jsconfig.json",
-  "include": [
-    "./**/*",
-    "../../types/*.d.ts",
-    "../../types/probe/shared/*.d.ts",
-    "../../types/probe/server/**/*.d.ts"
-  ]
+  "compilerOptions": {
+    "types": [
+      "../../types/probe/server/packages",
+      "../../types/probe/server/global",
+      "../../types/probe/shared"
+    ],
+    "paths": {
+      "packages/*": [
+        "../../types/probe/server/packages/*",
+        "../../types/probe/shared/*"
+      ]
+    }
+  },
+  "include": ["./**/*.js", "../../types/*.d.ts"],
+  "exclude": []
 }

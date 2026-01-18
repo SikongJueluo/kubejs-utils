@@ -1,14 +1,16 @@
 {
   "$schema": "https://www.schemastore.org/jsconfig.json",
   "compilerOptions": {
-    "lib": ["ES5", "ES2015"],
-    "target": "ES2015",
     "module": "commonjs",
-    "strict": true,
-    "checkJs": true,
+    "skipDefaultLibCheck": true,
+    "moduleResolution": "classic",
+    "composite": true,
+    "isolatedModules": true,
+    "lib": ["ES5", "ES2015"],
+    "incremental": true,
+    "target": "ES2015",
     "skipLibCheck": true,
-    "noImplicitAny": true,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true
+    "rootDir": ".",
+    "allowJs": true
   }
 }

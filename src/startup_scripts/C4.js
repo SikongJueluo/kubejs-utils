@@ -6,7 +6,7 @@ const $ServerStartedEvent = Java.loadClass(
     "net.minecraftforge.event.server.ServerStartedEvent",
 );
 
-const C4_EXPLOSION_TIME = 7 * 20; // 7 seconds in ticks
+const C4_EXPLOSION_TIME = 10 * 20; // 7 seconds in ticks
 const C4_EXPLOSION_POWER = 128; // Explosion power (TNT is 4)
 const C4_USE_TIME = 5 * 20; // 5 seconds in ticks
 
@@ -158,13 +158,13 @@ StartupEvents.registry("block", (event) => {
         .soundType(SoundType.WOOD) // Set a material (affects the sounds and some properties)
         .unbreakable()
         .textureAll("minecraft:block/target_top");
-});
 
-StartupEvents.registry("block", (event) => {
     event
         .create("c4") // Create a new block
         .soundType(SoundType.GRASS) // Set a material (affects the sounds and some properties)
         .hardness(1) // Set hardness (affects mining time)
+        .requiresTool(true)
+        .tagBlock("minecraft:mineable/axe") //can be mined faster with an axe
         .resistance(1) // Set resistance (to explosions, etc)
         .noItem() // Player cannot hold or place the item
         .noDrops()
@@ -229,6 +229,8 @@ StartupEvents.registry("item", (event) => {
             if (!entity.isPlayer() || entity.uuid === undefined) return;
             delete lastPlayerInfoMap[entity.uuid.toString()];
         });
+
+    event.create("c4_defuser", "axe").attackDamageBaseline(0).maxDamage(0);
 });
 
 // ==================== Client Side Logic ====================
@@ -258,35 +260,26 @@ ClientEvents.init(() => {
 });
 
 // Send data to the server when the key is pressed
-ForgeEvents.onEvent(
-    // @ts-ignore
-    $TickEvent$PlayerTickEvent,
-    /**
-     *
-     * @param {Internal.TickEvent$PlayerTickEvent} event
-     * @returns
-     */
-    (event) => {
-        if (operationKeyMapping === undefined) {
-            console.warn("Not in client platform");
-            return event;
-        }
+ForgeEvents.onEvent($TickEvent$PlayerTickEvent, (event) => {
+    if (operationKeyMapping === undefined) {
+        console.warn("Not in client platform");
+        return event;
+    }
 
-        while (operationKeyMapping.consumeClick()) {
-            const player = event.player;
-            const level = player.level;
-            if (!shouldStartUseC4(player, level)) continue;
+    while (operationKeyMapping.consumeClick()) {
+        const player = event.player;
+        const level = player.level;
+        if (!shouldStartUseC4(player, level)) continue;
 
-            /** @type {EventBus} */
-            const eventBus = /** @type {any} */ (global["eventBus"]);
-            if (eventBus !== null) {
-                eventBus.emit("C4UseStarted", { player: player });
-            } else {
-                console.warn("EventBus is not available");
-            }
+        /** @type {EventBus} */
+        const eventBus = /** @type {any} */ (global["eventBus"]);
+        if (eventBus !== null) {
+            eventBus.emit("C4UseStarted", { player: player });
+        } else {
+            console.warn("EventBus is not available");
         }
-    },
-);
+    }
+});
 
 // ==================== Server Side Logic ====================
 
@@ -383,12 +376,15 @@ function handleC4Activated(event) {
     let remainingSeconds = explosionTime / 20;
     server.scheduleRepeatingInTicks(20, (scheduledEvent) => {
         // Assert C4 exsiting
-        if (toExplosionC4Map[newBlockPosString] === null) return;
+        if (toExplosionC4Map[newBlockPosString] === null) {
+            scheduledEvent.clear();
+            return;
+        }
 
         remainingSeconds -= 1;
         if (remainingSeconds <= 0) {
             scheduledEvent.clear();
-            return scheduledEvent;
+            return;
         }
 
         server.players.forEach((p) => {
@@ -416,35 +412,26 @@ function handleC4Activated(event) {
     });
 }
 
-ForgeEvents.onEvent(
-    //@ts-ignore
-    $ServerStartedEvent,
+ForgeEvents.onEvent($ServerStartedEvent, (event) => {
     /**
-     *
-     * @param {Internal.ServerStartedEvent} event
-     * @returns
+     * WARNING: Must Do!!!
+     * Because Kubejs scheduler is not stable
+     * And need to fire once at first time
+     * Relative Issue: https://github.com/KubeJS-Mods/KubeJS/issues/763
      */
-    (event) => {
-        /**
-         * WARNING: Must Do!!!
-         * Because Kubejs scheduler is not stable
-         * And need to fire once at first time
-         * Relative Issue: https://github.com/KubeJS-Mods/KubeJS/issues/763
-         */
-        event.server.scheduleInTicks(1, (_) => {
-            console.log("Init Scheduler");
-        });
+    event.server.scheduleInTicks(1, (_) => {
+        console.log("Init Scheduler");
+    });
 
-        /** @type {EventBus} */
-        const eventBus = /** @type {any} */ (global["eventBus"]);
+    /** @type {EventBus} */
+    const eventBus = /** @type {any} */ (global["eventBus"]);
 
-        if (eventBus === null) {
-            console.error("C4 Handler: eventBus is not available");
-            return event;
-        }
+    if (eventBus === null) {
+        console.error("C4 Handler: eventBus is not available");
+        return event;
+    }
 
-        eventBus.register("C4Activated", handleC4Activated);
-        eventBus.register("C4UseStarted", handleC4UseStarted);
-        console.log("C4 Handler: Registered C4Activated event handler");
-    },
-);
+    eventBus.register("C4Activated", handleC4Activated);
+    eventBus.register("C4UseStarted", handleC4UseStarted);
+    console.log("C4 Handler: Registered C4Activated event handler");
+});

@@ -1,0 +1,6 @@
+{
+  "dependencies": {},
+  "devDependencies": {
+    "oxlint": "^1.39.0"
+  }
+}

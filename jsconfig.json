@@ -1,5 +1,6 @@
 {
   "$schema": "https://www.schemastore.org/jsconfig.json",
+  "include": ["src/**/*", "types/**/*"],
   "compilerOptions": {
     "module": "commonjs",
     "skipDefaultLibCheck": true,

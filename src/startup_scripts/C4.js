@@ -2,14 +2,35 @@ const $TickEvent$PlayerTickEvent = Java.loadClass(
     "net.minecraftforge.event.TickEvent$PlayerTickEvent",
 );
 
-const C4_EXPLOSION_TIME = 10 * 20; // 7 seconds in ticks
-const C4_EXPLOSION_POWER = 128; // Explosion power (TNT is 4)
-const C4_USE_TIME = 5 * 20; // 5 seconds in ticks
+/**
+ * C4 explosion time in ticks (7 seconds)
+ * @type {number}
+ */
+const C4_EXPLOSION_TIME = 10 * 20;
+
+/**
+ * C4 explosion power (TNT is 4)
+ * @type {number}
+ */
+const C4_EXPLOSION_POWER = 128;
+
+/**
+ * C4 use time in ticks (5 seconds)
+ * @type {number}
+ */
+const C4_USE_TIME = 5 * 20;
+
+/**
+ * @type {DataBus}
+ */
+const dataBus = /** @type {any} */ (global["dataBus"]);
 
 // Export constants for server scripts
-global["C4_EXPLOSION_TIME"] = C4_EXPLOSION_TIME;
-global["C4_EXPLOSION_POWER"] = C4_EXPLOSION_POWER;
-global["C4_USE_TIME"] = C4_USE_TIME;
+dataBus.export("C4_EXPLOSION_TIME", C4_EXPLOSION_TIME);
+
+dataBus.export("C4_EXPLOSION_POWER", C4_EXPLOSION_POWER);
+
+dataBus.export("C4_USE_TIME", C4_USE_TIME);
 
 // Tolerance for floating point comparison
 const ANGLE_TOLERANCE = 0.001;
@@ -30,13 +51,24 @@ let operationKeyMapping;
 const lastPlayerInfoMap = {};
 
 // Export for server scripts
-global["lastPlayerInfoMap"] = lastPlayerInfoMap;
+/**
+ * @type {{ [key: string]:{
+ *  angle: {x: number, y:number, z:number},
+ *  pos: {x: number, y: number, z: number},
+ *  blockPos: {x: number, y: number, z: number}
+ * } | undefined}}
+ */
+dataBus.export("lastPlayerInfoMap", lastPlayerInfoMap);
 
 /**
- * @type {{[key:string]: boolean}}
+ * @type {{[key:string]: boolean | null}}
  */
 const toExplosionC4Map = {};
-global["toExplosionC4Map"] = toExplosionC4Map;
+
+/**
+ * @type {{[key:string]: boolean | null}}
+ */
+dataBus.export("toExplosionC4Map", toExplosionC4Map);
 
 /**
  * Helper function to compare floating point numbers with tolerance
@@ -119,9 +151,16 @@ function shouldActivateC4(itemstack, level, player) {
 }
 
 // Export for server scripts
-global["shouldActivateC4"] = shouldActivateC4;
+/**
+ * @param {Internal.ItemStack} itemstack
+ * @param {Internal.Level} level
+ * @param {Internal.Player} player
+ * @returns {boolean}
+ */
+dataBus.export("shouldActivateC4", shouldActivateC4);
 
 /**
+ * Check if C4 use should start
  * @param {Internal.Player} player
  * @param {Internal.Level} level
  * @returns {boolean}
@@ -158,7 +197,12 @@ function shouldStartUseC4(player, level) {
 }
 
 // Export for server scripts
-global["shouldStartUseC4"] = shouldStartUseC4;
+/**
+ * @param {Internal.Player} player
+ * @param {Internal.Level} level
+ * @returns {boolean}
+ */
+dataBus.export("shouldStartUseC4", shouldStartUseC4);
 
 // ==================== Block Registration ====================
 

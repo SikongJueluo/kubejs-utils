@@ -4,6 +4,11 @@
  * Handles C4 use started and activated events
  */
 
+/**
+ * @type {DataBus}
+ */
+const dataBus = global["dataBus"];
+
 // ==================== Block Break Event Handler ====================
 
 BlockEvents.broken((event) => {
@@ -15,8 +20,7 @@ BlockEvents.broken((event) => {
     }
 
     // Get the toExplosionC4Map from global
-    /** @type {{[key:string]: boolean | null}} */
-    const toExplosionC4Map = /** @type {any} */ (global["toExplosionC4Map"]);
+    const toExplosionC4Map = dataBus.import("toExplosionC4Map");
 
     if (toExplosionC4Map === undefined || toExplosionC4Map === null) {
         console.warn("C4 Server: toExplosionC4Map is not available");

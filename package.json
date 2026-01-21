@@ -1,6 +1,12 @@
 {
-  "dependencies": {},
+  "scripts": {
+    "generate-types": "node scripts/AutoExport.js"
+  },
   "devDependencies": {
+    "@babel/generator": "^7.28.6",
+    "@babel/parser": "^7.28.6",
+    "@babel/traverse": "^7.28.6",
+    "@babel/types": "^7.28.6",
     "oxlint": "^1.39.0"
   }
 }

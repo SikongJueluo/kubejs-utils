@@ -6,6 +6,7 @@ interface EventMap {
     LivingEntityUseItemEvent$Finish: Internal.LivingEntityUseItemEvent$Finish;
     C4Activated: C4ActivatedEvent;
     C4UseStarted: C4UseStartedEvent;
+    C4Explosion: C4ExplosionEvent;
 }
 
 /**

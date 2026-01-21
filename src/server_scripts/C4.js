@@ -196,6 +196,17 @@ function handleC4Activated(event) {
         // Assert C4 exsiting
         if (toExplosionC4Map[newBlockPosString] === null) return;
 
+        // Emit C4 explosion event
+        /** @type {EventBus} */
+        const eventBus = /** @type {any} */ (global["eventBus"]);
+        if (eventBus === null) return;
+
+        eventBus.emit("C4Explosion", {
+            level: level,
+            position: c4BlockPos,
+            power: explosionPower,
+        });
+
         level.explode(
             /** @type {any} */ (null),
             c4BlockPos.x + 0.5,

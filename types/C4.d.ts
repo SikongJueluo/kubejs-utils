@@ -14,3 +14,16 @@ interface C4ActivatedEvent {
     explosionTime: number;
     explosionPower: number;
 }
+
+/**
+ * Event data for C4 explosion events.
+ */
+interface C4ExplosionEvent {
+    level: Internal.Level;
+    position: {
+        x: number;
+        y: number;
+        z: number;
+    };
+    power: number;
+}
